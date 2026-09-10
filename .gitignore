@@ -1,0 +1,19 @@
+# ROS / build artifacts
+build/
+install/
+log/
+*.log
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Editor / system
+.vscode/
+.DS_Store
+*.swp
+
+# Generated reports
+rosgraph.dot
+rosgraph.png
+rosgraph.svg
