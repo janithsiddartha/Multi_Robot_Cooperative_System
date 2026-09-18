@@ -1,0 +1,12 @@
+
+git checkout test 
+
+git add .
+git commit -m " fevwkghfvwg"
+git diff 
+git status
+git push 
+
+git checkout main 
+git merge test
+git push origin main
