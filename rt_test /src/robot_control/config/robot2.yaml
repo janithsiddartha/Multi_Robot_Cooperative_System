@@ -1,0 +1,42 @@
+/**:
+  ros__parameters:
+    robot:
+      name: robot2
+
+    kinematics:
+      dh:
+        alpha_deg: [0.0, 90.0, 0.0, -90.0, 90.0, 0.0, -90.0]
+        a: [0.0, 0.0, 120.0, 0.0, 0.0, 30.0, 0.0]
+        d: [116.62, 0.0, 0.0, 90.25, 0.0, 0.0, 118.63]
+        theta_offset_deg: [0.0, 90.0, -90.0, 0.0, 90.0, -90.0, 180.0]
+        theta_joint_index: [0, 1, 2, 3, -1, 4, -1]
+        theta_joint_multiplier: [1.0, -1.0, -1.0, 1.0, 0.0, -1.0, 0.0]
+
+      joints:
+        home_deg: [0.0, 0.0, 0.0, 0.0, 0.0]
+        limits_deg_min: [-135.0, -90.0, -90.0, -90.0, -90.0]
+        limits_deg_max: [135.0, 90.0, 90.0, 90.0, 90.0]
+        scale: [1.0, 0.75, 0.75, 0.50, 0.50]
+        sign: [-1, -1, 1, -1, -1]
+        offset: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+      tcp:
+        offset: [0.0, 0.0, 0.0]
+
+    uart:
+      port: "/dev/robot2"
+      baudrate: 115200
+
+    gripper:
+      open_angle: 55.0
+      close_angle: -55.0
+
+    trajectory:
+      dt: 0.02
+      approach_height: 50.0
+      segment_time: 2.0
+
+    gui:
+      title: "Robot 2 - Control Station"
+      overview: "Welcome to the Robot 2 Workstation.\n\n- FK: Control joints directly with sliders.\n- IK: Input precise Cartesian X, Y, Z targets.\n- Trajectory Analysis: Analyze and plot generated trajectories."
+      system_info: "DOF: 5\nRobot Type: Articulated Serial Manipulator\nController: ESP32\nServo Driver: PCA9685"

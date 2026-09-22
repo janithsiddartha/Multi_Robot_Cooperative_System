@@ -1,0 +1,41 @@
+/**:
+  ros__parameters:
+    robot:
+      name: robot1
+
+    kinematics:
+      dh:
+        alpha_deg: [0.0, 90.0, 0.0, 0.0, 0.0, -90.0, 0.0]
+        a: [0.0, 0.0, 120.0, 100.0, 80.0, 0.0, 0.0]
+        d: [100.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0]
+        theta_offset_deg: [0.0, 90.0, 0.0, 0.0, -90.0, -90.0, 90.0]
+        theta_joint_index: [0, -1, 1, 2, 3, 4, -1]
+        theta_joint_multiplier: [1.0, 0.0, 1.0, 1.0, -1.0, -1.0, 0.0]
+      joints:
+        home_deg: [0.0, 0.0, 0.0, 0.0, 0.0]
+        limits_deg_min: [-180.0, -90.0, -90.0, -90.0, -90.0]
+        limits_deg_max: [180.0, 90.0, 90.0, 90.0, 90.0]
+        scale: [0.5, 0.5, 0.5, 0.50, 0.50]
+        sign: [1, -1, -1, -1, -1]
+        offset: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+      tcp:
+        offset: [0.0, 0.0, 0.0]
+
+    uart:
+      port: "/dev/robot1"
+      baudrate: 115200
+
+    gripper:
+      open_angle: 0.0
+      close_angle: 0.0
+
+    trajectory:
+      dt: 0.02
+      approach_height: 50.0
+      segment_time: 2.0
+
+    gui:
+      title: "Robot 1 - Control Station"
+      overview: "Welcome to the Robot 1 Workstation.\n\n- FK: Control joints directly with sliders.\n- IK: Input precise Cartesian X, Y, Z targets.\n- Trajectory Analysis: Analyze and plot generated trajectories."
+      system_info: "DOF: 5\nRobot Type: Articulated Serial Manipulator\nController: ESP32\nServo Driver: PCA9685"
