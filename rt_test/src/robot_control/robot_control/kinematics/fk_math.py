@@ -20,8 +20,8 @@ def mdh_matrix(a_i, alpha_i, theta_i, d_i):
 
 
 def dh_joint_angles(q, config):
-    theta_dh = np.zeros(7)
-    for i in range(7):
+    theta_dh = np.zeros(config.num_frames)
+    for i in range(config.num_frames):
         theta_dh[i] = np.deg2rad(config.theta_offset_deg[i])
         idx = config.theta_joint_index[i]
         if idx >= 0:
@@ -39,7 +39,7 @@ def fk(q, config):
     theta_dh = dh_joint_angles(q, config)
     T = np.eye(4)
 
-    for i in range(7):
+    for i in range(config.num_frames):
         alpha_i = np.deg2rad(config.alpha_deg[i])
         Ti = mdh_matrix(config.a[i], alpha_i, theta_dh[i], config.d[i])
         T = T @ Ti
@@ -57,7 +57,7 @@ def all_frame_positions(q, config):
 
     # Frame 0
     positions.append(T[:3, 3].copy())
-    for i in range(7):
+    for i in range(config.num_frames):
         Ti = mdh_matrix(config.a[i], np.deg2rad(config.alpha_deg[i]), theta_dh[i], config.d[i])
         T = T @ Ti
         positions.append(T[:3, 3].copy())

@@ -16,6 +16,7 @@ from std_msgs.msg import Int32
 from std_msgs.msg import String
 
 import numpy as np
+import serial.tools.list_ports
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from mpl_toolkits.mplot3d import Axes3D
@@ -587,19 +588,7 @@ class RobotGUI(Node):
         # ROBOT CONFIGURATION
         # ====================================================
 
-        self.joint_names = [
-
-            'BASE',
-
-            'J1',
-
-            'J2',
-
-            'J3',
-
-            'J4'
-
-        ]
+        self.joint_names = ['BASE'] + [f'J{i}' for i in range(1, self.config.num_joints)]
 
         self.joint_min = self.config.joint_limits_deg[:, 0].tolist()
         self.joint_max = self.config.joint_limits_deg[:, 1].tolist()
@@ -611,19 +600,7 @@ class RobotGUI(Node):
         # Updated from /joint_commands.
         # ====================================================
 
-        self.joint_angles = [
-
-            0.0,
-
-            0.0,
-
-            0.0,
-
-            0.0,
-
-            0.0
-
-        ]
+        self.joint_angles = [0.0] * self.config.num_joints
 
 
         # ====================================================
@@ -645,9 +622,8 @@ class RobotGUI(Node):
         # GRIPPER
         # ====================================================
 
-        self.gripper_open_angle = 0.0
-
-        self.gripper_close_angle = -55.0
+        self.gripper_open_angle = self.config.gripper_open_angle
+        self.gripper_close_angle = self.config.gripper_close_angle
 
 
         # ====================================================
@@ -909,8 +885,8 @@ class RobotGUI(Node):
             tk.Label(inner, text=h, font=("Inter", 8, "bold"), bg=self.card_color, fg=self.secondary_text).grid(row=0, column=col, padx=4, pady=0)
         
         self.dh_theta_labels = []
-        for i in range(5):
-            tk.Label(inner, text=f'J{i+1}', font=("Inter", 8), bg=self.card_color, fg=self.primary_text).grid(row=i+1, column=0, padx=4, pady=0)
+        for i in range(self.config.num_joints):
+            tk.Label(inner, text=self.joint_names[i], font=("Inter", 8), bg=self.card_color, fg=self.primary_text).grid(row=i+1, column=0, padx=4, pady=0)
             tk.Label(inner, text=f'{a[i]:.2f}', font=("Inter", 8), bg=self.card_color, fg=self.primary_text).grid(row=i+1, column=1, padx=4, pady=0)
             tk.Label(inner, text=f'{d[i]:.2f}', font=("Inter", 8), bg=self.card_color, fg=self.primary_text).grid(row=i+1, column=2, padx=4, pady=0)
             tk.Label(inner, text=f'{alpha_deg[i]:.1f}', font=("Inter", 8), bg=self.card_color, fg=self.primary_text).grid(row=i+1, column=3, padx=4, pady=0)
@@ -920,7 +896,7 @@ class RobotGUI(Node):
             self.dh_theta_labels.append(lbl)
 
     def create_transformation_matrix_panel(self, parent):
-        frame = self.create_section_frame(parent, 'T07 TRANSFORMATION MATRIX')
+        frame = self.create_section_frame(parent, f'T0{self.config.num_frames} TRANSFORMATION MATRIX')
             
         self.matrix_labels = []
         mat_frame = tk.Frame(frame, bg=self.soft_blue)
@@ -973,7 +949,7 @@ class RobotGUI(Node):
         col2 = tk.Frame(info_frame, bg=self.card_color)
         col2.pack(side='right', fill='y', expand=True)
         
-        jl_text = f"Base: {JOINT_LIMITS_DEG[0,0]:.1f} to {JOINT_LIMITS_DEG[0,1]:.1f} deg\nJ1: {JOINT_LIMITS_DEG[1,0]:.1f} to {JOINT_LIMITS_DEG[1,1]:.1f} deg\nJ2: {JOINT_LIMITS_DEG[2,0]:.1f} to {JOINT_LIMITS_DEG[2,1]:.1f} deg\nJ3: {JOINT_LIMITS_DEG[3,0]:.1f} to {JOINT_LIMITS_DEG[3,1]:.1f} deg\nJ4: {JOINT_LIMITS_DEG[4,0]:.1f} to {JOINT_LIMITS_DEG[4,1]:.1f} deg"
+        jl_text = "\n".join([f"{self.joint_names[i]}: {self.config.joint_limits_deg[i,0]:.1f} to {self.config.joint_limits_deg[i,1]:.1f} deg" for i in range(self.config.num_joints)])
         tk.Label(col2, text="JOINT LIMITS", font=self.font_bold, fg=self.primary_blue, bg=self.card_color).pack(anchor='w', pady=(10, 0))
         tk.Label(col2, text=jl_text, font=self.font_main, fg=self.primary_text, bg=self.card_color, justify='left').pack(anchor='w')
         
@@ -986,7 +962,7 @@ class RobotGUI(Node):
         self.sliders = []
         self.angle_entries = []
 
-        for i in range(5):
+        for i in range(self.config.num_joints):
             row = tk.Frame(frame, bg=self.card_color)
             row.pack(fill='x', pady=3)
             tk.Label(row, text=self.joint_names[i], width=5, anchor='w', font=self.font_bold, bg=self.card_color, fg=self.secondary_text).pack(side='left')
@@ -1129,6 +1105,30 @@ class RobotGUI(Node):
         tk.Label(info_frame, text='Connection', font=self.font_main, fg=self.secondary_text, bg=self.card_color, anchor='w').grid(row=1, column=0, sticky='w', pady=2)
         self.connection_lbl = tk.Label(info_frame, text='CONNECTED', font=self.font_bold, fg=self.success_color, bg=self.card_color, anchor='e')
         self.connection_lbl.grid(row=1, column=1, sticky='e', pady=2)
+        
+        tk.Label(info_frame, text='Port', font=self.font_main, fg=self.secondary_text, bg=self.card_color, anchor='w').grid(row=2, column=0, sticky='w', pady=2)
+        port_frame = tk.Frame(info_frame, bg=self.card_color)
+        port_frame.grid(row=2, column=1, sticky='e', pady=2)
+        
+        from tkinter import ttk
+        ports = [p.device for p in serial.tools.list_ports.comports() if 'USB' in p.device or 'ACM' in p.device or 'COM' in p.device]
+        if not ports:
+            ports = ['/dev/robot1']
+        self.port_var = tk.StringVar(value=ports[0])
+        self.port_dropdown = ttk.Combobox(port_frame, textvariable=self.port_var, values=ports, width=10)
+        self.port_dropdown.pack(side='left', padx=(0, 5))
+        
+        def update_ports():
+            new_ports = [p.device for p in serial.tools.list_ports.comports() if 'USB' in p.device or 'ACM' in p.device or 'COM' in p.device]
+            self.port_dropdown['values'] = new_ports if new_ports else ['/dev/robot1']
+            
+        def connect_port():
+            msg = String()
+            msg.data = f'PORT,{self.port_var.get()}'
+            self.command_pub.publish(msg)
+            
+        self.port_dropdown.bind('<Button-1>', lambda e: update_ports())
+        RoundedButton(port_frame, text='SET', command=connect_port, bg_parent=self.card_color, bg=self.primary_blue, fg='white', hover_bg=self.soft_blue, height=20, font=("Inter", 8, "bold")).pack(side='left')
         self.status_label = tk.Label(frame, text='Waiting for /control_mode', bg=self.card_color, fg=self.secondary_text, font=self.font_small, wraplength=260, justify='center')
         self.status_label.pack(fill='x', pady=(10, 0))
 
@@ -1242,10 +1242,10 @@ class RobotGUI(Node):
             n_samples = 3000
             points = np.zeros((n_samples, 3))
             for k in range(n_samples):
-                q = q_min + (q_max - q_min) * np.random.rand(5)
+                q = q_min + (q_max - q_min) * np.random.rand(self.config.num_joints)
                 theta_dh = dh_joint_angles(q, self.config)
                 T = np.eye(4)
-                for i in range(7):
+                for i in range(self.config.num_frames):
                     T = T @ mdh_matrix(a[i], np.radians(alpha_deg[i]), theta_dh[i], d[i])
                 points[k] = T[:3, 3]
             self.ws_points = points
@@ -1258,13 +1258,13 @@ class RobotGUI(Node):
         # 1. Update DH Table Live Values
         theta_dh = dh_joint_angles(q_rad, self.config)
         if hasattr(self, 'dh_theta_labels'):
-            for i in range(5):
+            for i in range(self.config.num_joints):
                 self.dh_theta_labels[i].config(text=f'{np.degrees(theta_dh[i]):.1f}')
                 
         # 2. Update Transformation Matrices
         if hasattr(self, 'matrix_labels'):
             T = np.eye(4)
-            for i in range(7):
+            for i in range(self.config.num_frames):
                 T = T @ mdh_matrix(a[i], np.radians(alpha_deg[i]), theta_dh[i], d[i])
             
             for r in range(4):
@@ -1327,7 +1327,7 @@ class RobotGUI(Node):
         if hasattr(self, 'joint_frames_enabled') and self.joint_frames_enabled.get():
             T_curr = np.eye(4)
             frames = [T_curr.copy()]
-            for i in range(7):
+            for i in range(self.config.num_frames):
                 T_curr = T_curr @ mdh_matrix(a[i], np.radians(alpha_deg[i]), theta_dh[i], d[i])
                 frames.append(T_curr.copy())
             
@@ -1341,7 +1341,7 @@ class RobotGUI(Node):
                 self.ax.plot([p[0], p[0]+y_dir[0]], [p[1], p[1]+y_dir[1]], [p[2], p[2]+y_dir[2]], color='g', linewidth=2)
                 self.ax.plot([p[0], p[0]+z_dir[0]], [p[1], p[1]+z_dir[1]], [p[2], p[2]+z_dir[2]], color='b', linewidth=2)
             
-            labels = ['Base', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'TCP']
+            labels = ['Base'] + [f'F{i}' for i in range(1, self.config.num_frames)] + ['TCP']
             for i in range(min(len(points), len(labels))):
                 self.ax.text(X[i], Y[i], Z[i], labels[i], fontsize=9, color=self.primary_text)
 
@@ -1944,7 +1944,7 @@ class RobotGUI(Node):
 
     ):
 
-        if len(msg.data) != 5:
+        if len(msg.data) != self.config.num_joints:
 
             return
 
@@ -1980,7 +1980,7 @@ class RobotGUI(Node):
 
     ):
 
-        if len(q) != 5:
+        if len(q) != self.config.num_joints:
 
             return
 
@@ -1988,7 +1988,7 @@ class RobotGUI(Node):
         self.updating_gui = True
 
 
-        for i in range(5):
+        for i in range(self.config.num_joints):
 
             angle = float(q[i])
 
@@ -2192,7 +2192,7 @@ class RobotGUI(Node):
 
     ):
 
-        if len(msg.data) != 5:
+        if len(msg.data) != self.config.num_joints:
 
             return
 
@@ -2543,7 +2543,7 @@ class RobotGUI(Node):
 
         self.gripper_status.config(
 
-            text='OPEN  -  0 deg'
+            text=f'OPEN  -  {self.gripper_open_angle:.0f} deg'
 
         )
 
@@ -2582,7 +2582,7 @@ class RobotGUI(Node):
 
         self.gripper_status.config(
 
-            text='CLOSED  -  -55 deg'
+            text=f'CLOSED  -  {self.gripper_close_angle:.0f} deg'
 
         )
 

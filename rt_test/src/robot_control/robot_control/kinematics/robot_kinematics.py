@@ -22,6 +22,9 @@ class KinematicsConfig:
         self.joint_limits_deg = np.array(list(zip(limits_min, limits_max)))
         self.joint_limits_rad = np.deg2rad(self.joint_limits_deg)
 
+        self.num_frames = len(self.alpha_deg)
+        self.num_joints = len(self.home_deg)
+
         self.gripper_open_angle = self.get_param(node, 'gripper.open_angle')
         self.gripper_close_angle = self.get_param(node, 'gripper.close_angle')
 

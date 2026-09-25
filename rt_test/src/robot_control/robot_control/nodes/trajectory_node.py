@@ -43,7 +43,7 @@ class TrajectoryNode(Node):
         # ====================================================
 
         self.current_q_deg = np.zeros(
-            5,
+            self.config.num_joints,
             dtype=float
         )
 
@@ -429,7 +429,7 @@ class TrajectoryNode(Node):
 
     def joint_callback(self, msg):
 
-        if len(msg.data) != 5:
+        if len(msg.data) != self.config.num_joints:
             return
 
         self.current_q_deg = np.array(
@@ -715,7 +715,7 @@ class TrajectoryNode(Node):
             return
 
 
-        if len(msg.data) != 5:
+        if len(msg.data) != self.config.num_joints:
 
             self.publish_status(
                 'ERROR: INVALID_IK_SOLUTION'
@@ -913,13 +913,7 @@ class TrajectoryNode(Node):
 
         msg = Float64MultiArray()
 
-        msg.data = [
-            float(q[0]),
-            float(q[1]),
-            float(q[2]),
-            float(q[3]),
-            float(q[4])
-        ]
+        msg.data = [float(v) for v in q]
 
 
         self.joint_publisher.publish(
@@ -964,7 +958,7 @@ class TrajectoryNode(Node):
             )
 
             self.send_gripper(
-                -55.0
+                self.config.gripper_close_angle
             )
 
 
@@ -979,7 +973,7 @@ class TrajectoryNode(Node):
             )
 
             self.send_gripper(
-                0.0
+                self.config.gripper_open_angle
             )
 
 

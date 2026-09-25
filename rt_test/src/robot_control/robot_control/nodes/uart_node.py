@@ -161,6 +161,7 @@ class UARTNode(Node):
         # ====================================================
 
         self.joint_scale = self._get_required_param('kinematics.joints.scale')
+        self.num_joints = len(self.joint_scale)
 
 
         # ====================================================
@@ -442,7 +443,7 @@ class UARTNode(Node):
     def joint_callback(self, msg):
 
 
-        if len(msg.data) != 5:
+        if len(msg.data) != self.num_joints:
 
 
             self.get_logger().error(
@@ -454,7 +455,7 @@ class UARTNode(Node):
             return
 
 
-        for channel in range(5):
+        for channel in range(self.num_joints):
 
 
             robot_angle = float(
@@ -786,7 +787,23 @@ class UARTNode(Node):
 
             )
 
+            return
 
+
+        # ----------------------------------------------------
+        # PORT CHANGE
+        # ----------------------------------------------------
+
+        if command.startswith('PORT,'):
+            new_port = command.split(',', 1)[1].strip()
+            self.get_logger().info(f'Switching serial port to: {new_port}')
+            
+            if self.ser is not None and self.ser.is_open:
+                self.ser.close()
+                self.get_logger().info('Closed old serial port.')
+
+            self.port = new_port
+            self.setup_serial()
             return
 
 

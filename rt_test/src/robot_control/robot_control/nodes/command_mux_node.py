@@ -285,10 +285,10 @@ class CommandMuxNode(Node):
     def validate_joint_command(self, msg):
 
 
-        if len(msg.data) != 5:
+        if len(msg.data) < 1:
 
             self.get_logger().warn(
-                'Invalid joint command: expected 5 values'
+                'Invalid joint command: empty'
             )
 
             return False

@@ -24,7 +24,7 @@ class IKNode(Node):
 
         self.config = KinematicsConfig(self)
 
-        self.current_q_deg = np.zeros(5)
+        self.current_q_deg = np.zeros(self.config.num_joints)
 
         self.joint_subscription = self.create_subscription(
             Float64MultiArray,
@@ -96,7 +96,7 @@ class IKNode(Node):
         self.get_logger().info('========================================')
 
     def joint_callback(self, msg):
-        if len(msg.data) != 5:
+        if len(msg.data) != self.config.num_joints:
             self.get_logger().warn('Ignoring invalid joint command')
             return
         self.current_q_deg = np.array(msg.data, dtype=float)
@@ -144,7 +144,7 @@ class IKNode(Node):
         achieved_xyz, _ = fk(q_solution_rad, self.config)
 
         solution_msg = Float64MultiArray()
-        solution_msg.data = [float(q_solution_deg[i]) for i in range(5)]
+        solution_msg.data = [float(q_solution_deg[i]) for i in range(self.config.num_joints)]
 
         if source == 'GUI':
             self.gui_solution_publisher.publish(solution_msg)

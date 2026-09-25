@@ -7,8 +7,8 @@ from robot_control.kinematics.fk_math import fk
 
 def numerical_jacobian(q, config, delta=1e-6):
     q = np.asarray(q, dtype=float)
-    J = np.zeros((3, 5))
-    for i in range(5):
+    J = np.zeros((3, config.num_joints))
+    for i in range(config.num_joints):
         q_plus = q.copy()
         q_minus = q.copy()
         q_plus[i] += delta
@@ -52,8 +52,8 @@ def joint_limit_margin(q, config):
 # ============================================================
 
 def posture_gradient(q, config, delta=1e-6):
-    grad = np.zeros(5)
-    for i in range(5):
+    grad = np.zeros(config.num_joints)
+    for i in range(config.num_joints):
         q_plus = q.copy()
         q_minus = q.copy()
         q_plus[i] += delta
@@ -88,7 +88,7 @@ def ik_single(
 ):
     target = np.asarray(target, dtype=float)
     if q_init is None:
-        q = np.zeros(5)
+        q = np.zeros(config.num_joints)
     else:
         q = np.asarray(q_init, dtype=float).copy()
 
@@ -106,7 +106,7 @@ def ik_single(
         J_pinv = damped_pseudoinverse(J, damping)
         dq_task = J_pinv @ error
         
-        N = np.eye(5) - J_pinv @ J
+        N = np.eye(config.num_joints) - J_pinv @ J
         grad_H = posture_gradient(q, config)
         dq_null = -posture_gain * N @ grad_H
 
@@ -128,7 +128,7 @@ def ik_single(
 def ik(target, config, current_q=None, num_random_starts=30):
     target = np.asarray(target, dtype=float)
     candidates = []
-    initial_guesses = [np.zeros(5)]
+    initial_guesses = [np.zeros(config.num_joints)]
 
     if current_q is not None:
         initial_guesses.append(np.asarray(current_q, dtype=float))
@@ -137,7 +137,7 @@ def ik(target, config, current_q=None, num_random_starts=30):
     q_max = config.joint_limits_rad[:, 1]
     
     for _ in range(num_random_starts):
-        initial_guesses.append(q_min + (q_max - q_min) * np.random.rand(5))
+        initial_guesses.append(q_min + (q_max - q_min) * np.random.rand(config.num_joints))
 
     for q_init in initial_guesses:
         result = ik_single(target, config, q_init=q_init)

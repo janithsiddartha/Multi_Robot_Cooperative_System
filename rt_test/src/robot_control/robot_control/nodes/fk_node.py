@@ -55,7 +55,7 @@ class FKNode(Node):
         # ----------------------------------------------------
         # VALIDATE INPUT
         # ----------------------------------------------------
-        if len(msg.data) != 5:
+        if len(msg.data) != self.config.num_joints:
             self.get_logger().error('FK ERROR: Expected 5 joint angles')
             return
 

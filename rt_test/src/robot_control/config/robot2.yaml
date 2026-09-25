@@ -24,7 +24,7 @@
         offset: [0.0, 0.0, 0.0]
 
     uart:
-      port: "/dev/robot2"
+      port: "/dev/ttyACM1"
       baudrate: 115200
 
     gripper:
