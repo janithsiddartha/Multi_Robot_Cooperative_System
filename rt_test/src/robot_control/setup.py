@@ -28,6 +28,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'hardware_translator_node = robot_control.nodes.hardware_translator_node:main',
             'uart_node = robot_control.nodes.uart_node:main',
             'fk_node = robot_control.nodes.fk_node:main',
             'visualizer_node = robot_control.nodes.visualizer_node:main',

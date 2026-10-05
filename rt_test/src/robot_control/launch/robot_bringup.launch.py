@@ -55,7 +55,8 @@ def generate_launch_description():
         'fk_node',
         'ik_node',
         'trajectory_node',
-        'uart_node'
+        'hardware_translator_node',
+       #'uart_node'
     ]
 
     launch_actions = [robot_name_arg, config_arg, namespace_action]

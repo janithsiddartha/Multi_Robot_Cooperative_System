@@ -1167,7 +1167,7 @@ class RobotGUI(Node):
         from tkinter import ttk
         ports = ['/dev/robot1']
         self.port_var = tk.StringVar(value=ports[0])
-        self.port_dropdown = ttk.Combobox(port_frame, textvariable=self.port_var, values=ports, width=10)
+        self.port_dropdown = ttk.Combobox(port_frame, textvariable=self.port_var, values=ports, width=20, state='readonly')
         self.port_dropdown.pack(side='left', padx=(0, 5))
         
         def connect_port():
@@ -1184,7 +1184,7 @@ class RobotGUI(Node):
         self.status_bar.pack(fill='x', side='bottom')
 
     def available_ports_callback(self, msg):
-        ports = msg.data.split(',')
+        ports = sorted(msg.data.split(','))
         if ports == ['NONE'] or ports == ['']:
             ports = ['/dev/robot1']
         
