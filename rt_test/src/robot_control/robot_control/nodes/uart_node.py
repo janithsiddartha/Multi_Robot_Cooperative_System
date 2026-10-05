@@ -16,6 +16,7 @@ from std_msgs.msg import String
 from rcl_interfaces.msg import ParameterDescriptor
 
 import serial
+import serial.tools.list_ports
 
 
 # ============================================================
@@ -277,6 +278,18 @@ class UARTNode(Node):
             10
 
         )
+
+
+        # ====================================================
+        # AVAILABLE PORTS PUBLISHER
+        # ====================================================
+
+        self.ports_pub = self.create_publisher(
+            String,
+            'available_ports',
+            10
+        )
+        self.ports_timer = self.create_timer(2.0, self.publish_ports)
 
 
         # ====================================================
@@ -708,15 +721,8 @@ class UARTNode(Node):
     def system_callback(self, msg):
 
 
-        command = (
-
-            msg.data
-
-            .strip()
-
-            .upper()
-
-        )
+        raw_command = msg.data.strip()
+        command = raw_command.upper()
 
 
         # ----------------------------------------------------
@@ -795,7 +801,7 @@ class UARTNode(Node):
         # ----------------------------------------------------
 
         if command.startswith('PORT,'):
-            new_port = command.split(',', 1)[1].strip()
+            new_port = raw_command.split(',', 1)[1].strip()
             self.get_logger().info(f'Switching serial port to: {new_port}')
             
             if self.ser is not None and self.ser.is_open:
@@ -803,7 +809,12 @@ class UARTNode(Node):
                 self.get_logger().info('Closed old serial port.')
 
             self.port = new_port
-            self.setup_serial()
+            try:
+                self.ser = serial.Serial(self.port, self.baudrate, timeout=0.1)
+                self.get_logger().info(f'Connected to ESP32: {self.port} @ {self.baudrate}')
+            except serial.SerialException as e:
+                self.ser = None
+                self.get_logger().error(f'Failed to open serial port: {e}')
             return
 
 
@@ -816,6 +827,19 @@ class UARTNode(Node):
             f'Unknown system command: {command}'
 
         )
+
+
+    # ========================================================
+    # PUBLISH AVAILABLE PORTS
+    # ========================================================
+
+    def publish_ports(self):
+        ports = [p.device for p in serial.tools.list_ports.comports() if 'USB' in p.device or 'ACM' in p.device or 'COM' in p.device]
+        if not ports:
+            ports = ['NONE']
+        msg = String()
+        msg.data = ','.join(ports)
+        self.ports_pub.publish(msg)
 
 
     # ========================================================
@@ -855,6 +879,22 @@ class UARTNode(Node):
 
 def main(args=None):
 
+    import sys
+    import os
+    from ament_index_python.packages import get_package_share_directory
+
+    if args is None:
+        args = sys.argv
+
+    if '--ros-args' not in args:
+        try:
+            pkg_share = get_package_share_directory('robot_control')
+            robot_name = os.environ.get('ROBOT_NAME', 'robot1')
+            config_path = os.path.join(pkg_share, 'config', f'{robot_name}.yaml')
+            args = [args[0], '--ros-args', '--params-file', config_path]
+            print(f"[UART Auto-Config] Automatically loading {robot_name}.yaml...")
+        except Exception as e:
+            print(f"[UART Auto-Config] Failed to load default params: {e}")
 
     rclpy.init(
 

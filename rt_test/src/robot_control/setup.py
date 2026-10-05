@@ -40,6 +40,11 @@ setup(
             'robot_gui_test_2 = robot_control.gui.robot_gui_test_2:main',
             'robot_gui_test_3 = robot_control.gui.robot_gui_test_3:main',
             'multi_robot_gui = robot_control.gui.multi_robot_gui:main',
+            'handover_planner_node = robot_control.nodes.handover_planner_node:main',
+            'handover_visualizer_node = robot_control.nodes.handover_visualizer_node:main',
+            'common_workspace_node = robot_control.nodes.common_workspace_node:main',
+            'multi_robot_handover_gui = robot_control.gui.multi_robot_handover_gui:main',
+            'handover_pose_node = robot_control.nodes.handover_pose_node:main',
         ],
     },
 )

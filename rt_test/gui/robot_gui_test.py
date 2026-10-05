@@ -584,6 +584,18 @@ class RobotGUI(Node):
         )
 
 
+        # ----------------------------------------------------
+        # AVAILABLE PORTS
+        # ----------------------------------------------------
+
+        self.available_ports_subscription = self.create_subscription(
+            String,
+            'available_ports',
+            self.available_ports_callback,
+            10
+        )
+
+
         # ====================================================
         # ROBOT CONFIGURATION
         # ====================================================
@@ -880,19 +892,61 @@ class RobotGUI(Node):
         frame = self.create_section_frame(parent, 'LIVE DH PARAMETERS')
         inner = tk.Frame(frame, bg=self.card_color)
         inner.pack(fill='both', expand=True)
-        headers = ['Link', 'a (mm)', 'd (mm)', 'α (deg)', 'θ (deg)']
+
+        headers = ['Frame', 'a (mm)', 'd (mm)', 'α (deg)', 'θ (deg)']
         for col, h in enumerate(headers):
-            tk.Label(inner, text=h, font=("Inter", 8, "bold"), bg=self.card_color, fg=self.secondary_text).grid(row=0, column=col, padx=4, pady=0)
-        
+            tk.Label(
+                inner,
+                text=h,
+                font=("Inter", 8, "bold"),
+                bg=self.card_color,
+                fg=self.secondary_text
+            ).grid(row=0, column=col, padx=4, pady=0)
+
         self.dh_theta_labels = []
-        for i in range(self.config.num_joints):
-            tk.Label(inner, text=self.joint_names[i], font=("Inter", 8), bg=self.card_color, fg=self.primary_text).grid(row=i+1, column=0, padx=4, pady=0)
-            tk.Label(inner, text=f'{a[i]:.2f}', font=("Inter", 8), bg=self.card_color, fg=self.primary_text).grid(row=i+1, column=1, padx=4, pady=0)
-            tk.Label(inner, text=f'{d[i]:.2f}', font=("Inter", 8), bg=self.card_color, fg=self.primary_text).grid(row=i+1, column=2, padx=4, pady=0)
-            tk.Label(inner, text=f'{alpha_deg[i]:.1f}', font=("Inter", 8), bg=self.card_color, fg=self.primary_text).grid(row=i+1, column=3, padx=4, pady=0)
-            
-            lbl = tk.Label(inner, text='0.0', font=("Inter", 8, "bold"), bg=self.card_color, fg=self.deep_blue)
+
+        for i in range(self.config.num_frames):
+            tk.Label(
+                inner,
+                text=f'F{i+1}',
+                font=("Inter", 8),
+                bg=self.card_color,
+                fg=self.primary_text
+            ).grid(row=i+1, column=0, padx=4, pady=0)
+
+            tk.Label(
+                inner,
+                text=f'{a[i]:.2f}',
+                font=("Inter", 8),
+                bg=self.card_color,
+                fg=self.primary_text
+            ).grid(row=i+1, column=1, padx=4, pady=0)
+
+            tk.Label(
+                inner,
+                text=f'{d[i]:.2f}',
+                font=("Inter", 8),
+                bg=self.card_color,
+                fg=self.primary_text
+            ).grid(row=i+1, column=2, padx=4, pady=0)
+
+            tk.Label(
+                inner,
+                text=f'{alpha_deg[i]:.1f}',
+                font=("Inter", 8),
+                bg=self.card_color,
+                fg=self.primary_text
+            ).grid(row=i+1, column=3, padx=4, pady=0)
+
+            lbl = tk.Label(
+                inner,
+                text='0.0',
+                font=("Inter", 8, "bold"),
+                bg=self.card_color,
+                fg=self.deep_blue
+            )
             lbl.grid(row=i+1, column=4, padx=4, pady=0)
+
             self.dh_theta_labels.append(lbl)
 
     def create_transformation_matrix_panel(self, parent):
@@ -1111,23 +1165,16 @@ class RobotGUI(Node):
         port_frame.grid(row=2, column=1, sticky='e', pady=2)
         
         from tkinter import ttk
-        ports = [p.device for p in serial.tools.list_ports.comports() if 'USB' in p.device or 'ACM' in p.device or 'COM' in p.device]
-        if not ports:
-            ports = ['/dev/robot1']
+        ports = ['/dev/robot1']
         self.port_var = tk.StringVar(value=ports[0])
         self.port_dropdown = ttk.Combobox(port_frame, textvariable=self.port_var, values=ports, width=10)
         self.port_dropdown.pack(side='left', padx=(0, 5))
         
-        def update_ports():
-            new_ports = [p.device for p in serial.tools.list_ports.comports() if 'USB' in p.device or 'ACM' in p.device or 'COM' in p.device]
-            self.port_dropdown['values'] = new_ports if new_ports else ['/dev/robot1']
-            
         def connect_port():
             msg = String()
             msg.data = f'PORT,{self.port_var.get()}'
             self.command_pub.publish(msg)
             
-        self.port_dropdown.bind('<Button-1>', lambda e: update_ports())
         RoundedButton(port_frame, text='SET', command=connect_port, bg_parent=self.card_color, bg=self.primary_blue, fg='white', hover_bg=self.soft_blue, height=20, font=("Inter", 8, "bold")).pack(side='left')
         self.status_label = tk.Label(frame, text='Waiting for /control_mode', bg=self.card_color, fg=self.secondary_text, font=self.font_small, wraplength=260, justify='center')
         self.status_label.pack(fill='x', pady=(10, 0))
@@ -1135,6 +1182,15 @@ class RobotGUI(Node):
     def create_status_bar(self):
         self.status_bar = tk.Label(self.root, text='ROS GUI READY', anchor='w', bg=self.bg_color, fg=self.secondary_text, font=self.font_small, padx=20, pady=6)
         self.status_bar.pack(fill='x', side='bottom')
+
+    def available_ports_callback(self, msg):
+        ports = msg.data.split(',')
+        if ports == ['NONE'] or ports == ['']:
+            ports = ['/dev/robot1']
+        
+        current_values = list(self.port_dropdown['values'])
+        if current_values != ports:
+            self.port_dropdown['values'] = ports
 
 
 
@@ -1258,7 +1314,7 @@ class RobotGUI(Node):
         # 1. Update DH Table Live Values
         theta_dh = dh_joint_angles(q_rad, self.config)
         if hasattr(self, 'dh_theta_labels'):
-            for i in range(self.config.num_joints):
+            for i in range(self.config.num_frames):
                 self.dh_theta_labels[i].config(text=f'{np.degrees(theta_dh[i]):.1f}')
                 
         # 2. Update Transformation Matrices
