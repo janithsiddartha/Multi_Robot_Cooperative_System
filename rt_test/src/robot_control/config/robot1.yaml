@@ -32,6 +32,9 @@
     gripper:
       open_angle: -55.0
       close_angle: 55.0
+      scale: 1.0
+      sign: 1.0
+      offset: 0.0
 
     trajectory:
       dt: 0.02

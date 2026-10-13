@@ -29,6 +29,9 @@ class HardwareTranslatorNode(Node):
         self.joint_offset = self._get_required_param('kinematics.joints.offset')
         self.gripper_open = self._get_required_param('gripper.open_angle')
         self.gripper_close = self._get_required_param('gripper.close_angle')
+        self.gripper_scale = self._get_required_param('gripper.scale')
+        self.gripper_sign = self._get_required_param('gripper.sign')
+        self.gripper_offset = self._get_required_param('gripper.offset')
 
         # Subscribers
         self.create_subscription(String, 'control_mode', self.mode_callback, mode_qos)
@@ -74,9 +77,12 @@ class HardwareTranslatorNode(Node):
         angle = float(msg.data[0])
         min_angle = min(self.gripper_open, self.gripper_close)
         max_angle = max(self.gripper_open, self.gripper_close)
-        angle = int(round(max(min_angle, min(max_angle, angle))))
+        angle = max(min_angle, min(max_angle, angle))
         
-        self.publish_serial(f'J,{self.num_joints},{angle}')
+        servo_angle = (self.gripper_sign * (angle / self.gripper_scale) + self.gripper_offset)
+        servo_angle = int(round(max(-180.0, min(180.0, servo_angle))))
+        
+        self.publish_serial(f'J,{self.num_joints},{servo_angle}')
 
     def speed_callback(self, msg):
         speed = max(1, min(10, int(msg.data)))

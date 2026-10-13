@@ -287,17 +287,6 @@ void setServoTarget(
   );
 
 
-  // Gripper range
-
-  if (channel == CH_GRIPPER)
-  {
-    angle = constrain(
-      angle,
-      -55.0,
-      0.0
-    );
-  }
-
 
   targetAngle[channel] =
     angle;
@@ -427,26 +416,12 @@ void updateMotion()
     // Safety limits
     // --------------------------------------------------------
 
-    if (
-      channel == CH_GRIPPER
-    )
-    {
-      currentAngle[channel] =
-        constrain(
-          currentAngle[channel],
-          -55.0,
-          0.0
-        );
-    }
-    else
-    {
-      currentAngle[channel] =
-        constrain(
-          currentAngle[channel],
-          -180.0,
-          180.0
-        );
-    }
+    currentAngle[channel] =
+      constrain(
+        currentAngle[channel],
+        -180.0,
+        180.0
+      );
 
 
     // --------------------------------------------------------

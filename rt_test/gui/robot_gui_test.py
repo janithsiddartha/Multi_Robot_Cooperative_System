@@ -1080,6 +1080,18 @@ class RobotGUI(Node):
 
     def create_gripper_panel(self, parent):
         frame = self.create_section_frame(parent, 'GRIPPER')
+        
+        entry_frame = tk.Frame(frame, bg=self.card_color)
+        entry_frame.pack(fill='x', pady=(0, 6))
+        
+        tk.Label(entry_frame, text='Open°:', font=self.font_small, bg=self.card_color, fg=self.secondary_text).pack(side='left')
+        self.gripper_open_entry, open_cont = self.create_rounded_entry(entry_frame, '')
+        open_cont.pack(side='left', padx=(2, 10))
+        
+        tk.Label(entry_frame, text='Close°:', font=self.font_small, bg=self.card_color, fg=self.secondary_text).pack(side='left')
+        self.gripper_close_entry, close_cont = self.create_rounded_entry(entry_frame, '')
+        close_cont.pack(side='left', padx=(2, 0))
+
         btn_frame = tk.Frame(frame, bg=self.card_color)
         btn_frame.pack(fill='x', pady=(0, 6))
         self.gripper_open_button = RoundedButton(btn_frame, text='◱  OPEN', command=self.gripper_open, bg_parent=self.card_color, bg=self.card_color, border_color=self.sky_blue, fg=self.primary_blue, hover_bg=self.soft_blue, width=100, height=32)
@@ -1302,7 +1314,7 @@ class RobotGUI(Node):
                 theta_dh = dh_joint_angles(q, self.config)
                 T = np.eye(4)
                 for i in range(self.config.num_frames):
-                    T = T @ mdh_matrix(a[i], np.radians(alpha_deg[i]), theta_dh[i], d[i])
+                    T = T @ mdh_matrix(self.config.a[i], np.radians(self.config.alpha_deg[i]), theta_dh[i], self.config.d[i])
                 points[k] = T[:3, 3]
             self.ws_points = points
         return self.ws_points
@@ -1321,7 +1333,7 @@ class RobotGUI(Node):
         if hasattr(self, 'matrix_labels'):
             T = np.eye(4)
             for i in range(self.config.num_frames):
-                T = T @ mdh_matrix(a[i], np.radians(alpha_deg[i]), theta_dh[i], d[i])
+                T = T @ mdh_matrix(self.config.a[i], np.radians(self.config.alpha_deg[i]), theta_dh[i], self.config.d[i])
             
             for r in range(4):
                 for c in range(4):
@@ -2578,36 +2590,30 @@ class RobotGUI(Node):
 
     def gripper_open(self):
 
-
         if self.control_mode != 'MANUAL':
-
             self.status_label.config(
-
                 text='Manual gripper control unavailable'
-
             )
-
             return
 
+        val = self.gripper_open_entry.get().strip()
+        if val:
+            try:
+                angle = float(val)
+            except ValueError:
+                self.status_label.config(text='Invalid Gripper Open Angle')
+                return
+        else:
+            angle = self.gripper_open_angle
 
-        self.send_manual_gripper(
-
-            self.gripper_open_angle
-
-        )
-
+        self.send_manual_gripper(angle)
 
         self.gripper_status.config(
-
-            text=f'OPEN  -  {self.gripper_open_angle:.0f} deg'
-
+            text=f'OPEN  -  {angle:.0f} deg'
         )
 
-
         self.status_label.config(
-
             text='Gripper OPEN command sent'
-
         )
 
 
@@ -2617,36 +2623,30 @@ class RobotGUI(Node):
 
     def gripper_close(self):
 
-
         if self.control_mode != 'MANUAL':
-
             self.status_label.config(
-
                 text='Manual gripper control unavailable'
-
             )
-
             return
 
+        val = self.gripper_close_entry.get().strip()
+        if val:
+            try:
+                angle = float(val)
+            except ValueError:
+                self.status_label.config(text='Invalid Gripper Close Angle')
+                return
+        else:
+            angle = self.gripper_close_angle
 
-        self.send_manual_gripper(
-
-            self.gripper_close_angle
-
-        )
-
+        self.send_manual_gripper(angle)
 
         self.gripper_status.config(
-
-            text=f'CLOSED  -  {self.gripper_close_angle:.0f} deg'
-
+            text=f'CLOSED  -  {angle:.0f} deg'
         )
 
-
         self.status_label.config(
-
             text='Gripper CLOSE command sent'
-
         )
 
 

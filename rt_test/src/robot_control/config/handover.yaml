@@ -57,3 +57,14 @@ robots:
   robot3:
     world_base_xyz: [0.0, 250.0, 0.0]
     world_base_rpy_deg: [0.0, 0.0, 90.0]
+
+manual_handover:
+  robot1_robot2:
+    robot1_q: [0.0, 45.0, -90.0, -45.0, 0.0]
+    robot2_q: [0.0, 45.0, -90.0, -45.0, 0.0]
+  robot2_robot3:
+    robot2_q: [90.0, 45.0, -90.0, -45.0, 0.0]
+    robot3_q: [-90.0, 45.0, -90.0, -45.0, 0.0, 0.0]
+  robot3_robot1:
+    robot3_q: [90.0, 45.0, -90.0, -45.0, 0.0, 0.0]
+    robot1_q: [-90.0, 45.0, -90.0, -45.0, 0.0]
