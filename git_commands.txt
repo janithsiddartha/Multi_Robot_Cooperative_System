@@ -9,4 +9,18 @@ git push
 
 git checkout main 
 git merge test
-git push origin main
+git push origin 
+
+to update from github in any pc 
+Keep your local changes, then get GitHub updates
+
+git stash
+git pull origin main
+git stash pop
+
+Make this folder exactly match GitHub
+⚠️ This permanently discards your local modified changes:
+
+git fetch origin
+git reset --hard origin/main
+git clean -fd
