@@ -22,7 +22,7 @@ from robot_control.kinematics.fk_math import all_frame_positions
 
 
 class MockKinematicsConfig:
-    def __init__(self, yaml_data, world_base_xyz, world_base_rpy_deg):
+    def __init__(self, yaml_data, world_base_xyz, world_base_rpy_deg, handover_cfg=None):
         params = yaml_data["/**"]["ros__parameters"]
         kin = params["kinematics"]
 
@@ -46,11 +46,22 @@ class MockKinematicsConfig:
         self.world_base_xyz = np.array(world_base_xyz, dtype=float)
         self.world_base_R = euler_to_matrix(np.deg2rad(world_base_rpy_deg))
 
+        gripper = params.get("gripper", {})
+        self.gripper_open = float(gripper.get("open_angle", -55.0))
+        self.gripper_close = float(gripper.get("close_angle", 55.0))
+        self.gripper_finger_axis = str(gripper.get("finger_axis", "x")).lower()
+        self.gripper_approach_axis = str(gripper.get("approach_axis", "z")).lower()
+        self.handover_cfg = handover_cfg or {}
+
 
 def default_config_dir():
-    return os.path.normpath(
+    # Check source workspace config first so direct edits take effect immediately
+    src_dir = os.path.normpath(
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "config")
     )
+    if os.path.exists(os.path.join(src_dir, "handover.yaml")):
+        return src_dir
+    return src_dir
 
 
 def load_stage1_robots(config_dir=None):
@@ -71,6 +82,7 @@ def load_stage1_robots(config_dir=None):
             yaml_data,
             base["world_base_xyz"],
             base["world_base_rpy_deg"],
+            handover_cfg=handover_cfg,
         )
         robot_yaml_paths[rid] = path
 
@@ -79,6 +91,14 @@ def load_stage1_robots(config_dir=None):
 
 def lookup_manual_handover(handover_cfg, robot_a, robot_b):
     """Return (q_a_deg, q_b_deg) from manual_handover, or None."""
+    res = lookup_manual_handover_with_pre(handover_cfg, robot_a, robot_b)
+    if res is None:
+        return None
+    return res[0], res[1]
+
+
+def lookup_manual_handover_with_pre(handover_cfg, robot_a, robot_b):
+    """Return (q_a_deg, q_b_deg, pre_q_a_deg, pre_q_b_deg) from manual_handover, or None."""
     table = handover_cfg.get("manual_handover") or {}
     forward = table.get(f"{robot_a}_{robot_b}")
     reverse = table.get(f"{robot_b}_{robot_a}")
@@ -89,7 +109,20 @@ def lookup_manual_handover(handover_cfg, robot_a, robot_b):
     q_b = entry.get(f"{robot_b}_q")
     if q_a is None or q_b is None:
         return None
-    return np.array(q_a, dtype=float), np.array(q_b, dtype=float)
+
+    pre_q_a = entry.get(f"{robot_a}_pre_q")
+    pre_q_b = entry.get(f"{robot_b}_pre_q")
+    if pre_q_a is None:
+        pre_q_a = q_a
+    if pre_q_b is None:
+        pre_q_b = q_b
+
+    return (
+        np.array(q_a, dtype=float),
+        np.array(q_b, dtype=float),
+        np.array(pre_q_a, dtype=float),
+        np.array(pre_q_b, dtype=float),
+    )
 
 
 def generate_interpolated_path(q_start, q_end, steps=50):
@@ -134,6 +167,8 @@ class Stage1Plan:
     needs_handover: bool
     pick_handover_q: Optional[np.ndarray]
     place_handover_q: Optional[np.ndarray]
+    pick_pre_handover_q: Optional[np.ndarray] = None
+    place_pre_handover_q: Optional[np.ndarray] = None
 
 
 def build_stage1_plan(
@@ -166,14 +201,16 @@ def build_stage1_plan(
 
     pick_h_q = None
     place_h_q = None
+    pick_pre_h_q = None
+    place_pre_h_q = None
     needs_handover = pick_rid != place_rid
     if needs_handover:
-        handover = lookup_manual_handover(handover_cfg, pick_rid, place_rid)
+        handover = lookup_manual_handover_with_pre(handover_cfg, pick_rid, place_rid)
         if handover is None:
             raise RuntimeError(
                 f"No manual_handover entry for {pick_rid} <-> {place_rid} in handover.yaml"
             )
-        pick_h_q, place_h_q = handover
+        pick_h_q, place_h_q, pick_pre_h_q, place_pre_h_q = handover
 
     return Stage1Plan(
         pick_robot=pick_rid,
@@ -183,6 +220,8 @@ def build_stage1_plan(
         needs_handover=needs_handover,
         pick_handover_q=pick_h_q,
         place_handover_q=place_h_q,
+        pick_pre_handover_q=pick_pre_h_q,
+        place_pre_handover_q=place_pre_h_q,
     ), pick_opts, place_opts
 
 
@@ -249,28 +288,45 @@ def main():
         print("VALID" if pick_ok and place_ok else "INVALID")
         return
 
-    print("\nHANDOVER")
+    print("\nHANDOVER (WITH PRE-HANDOVER)")
+    print(f"{plan.pick_robot} pre_q = {plan.pick_pre_handover_q}")
+    print(f"{plan.place_robot} pre_q = {plan.place_pre_handover_q}")
     print(f"{plan.pick_robot} q = {plan.pick_handover_q}")
     print(f"{plan.place_robot} q = {plan.place_handover_q}")
+
+    pick_pre_q = plan.pick_pre_handover_q if plan.pick_pre_handover_q is not None else plan.pick_handover_q
+    place_pre_q = plan.place_pre_handover_q if plan.place_pre_handover_q is not None else plan.place_handover_q
 
     start_pick = np.zeros(robots[plan.pick_robot].num_joints)
     start_place = np.zeros(robots[plan.place_robot].num_joints)
     pick_path = generate_interpolated_path(start_pick, plan.pick.q_deg)
-    pick_h_path = generate_interpolated_path(plan.pick.q_deg, plan.pick_handover_q)
-    place_h_path = generate_interpolated_path(start_place, plan.place_handover_q)
-    place_path = generate_interpolated_path(plan.place_handover_q, plan.place.q_deg)
+    pick_pre_path = generate_interpolated_path(plan.pick.q_deg, pick_pre_q)
+    place_pre_path = generate_interpolated_path(start_place, place_pre_q)
+    advance_pick = generate_interpolated_path(pick_pre_q, plan.pick_handover_q)
+    advance_place = generate_interpolated_path(place_pre_q, plan.place_handover_q)
+    retract_pick = generate_interpolated_path(plan.pick_handover_q, pick_pre_q)
+    retract_place = generate_interpolated_path(plan.place_handover_q, place_pre_q)
+    place_path = generate_interpolated_path(place_pre_q, plan.place.q_deg)
 
     print("\nPATH VALIDATION")
     pick_ok = collision_check_path(pick_path, robots[plan.pick_robot], safe_distance)
-    pick_h_ok = collision_check_path(pick_h_path, robots[plan.pick_robot], safe_distance)
-    place_h_ok = collision_check_path(place_h_path, robots[plan.place_robot], safe_distance)
+    pick_pre_ok = collision_check_path(pick_pre_path, robots[plan.pick_robot], safe_distance)
+    place_pre_ok = collision_check_path(place_pre_path, robots[plan.place_robot], safe_distance)
+    adv_pick_ok = collision_check_path(advance_pick, robots[plan.pick_robot], safe_distance)
+    adv_place_ok = collision_check_path(advance_place, robots[plan.place_robot], safe_distance)
+    ret_pick_ok = collision_check_path(retract_pick, robots[plan.pick_robot], safe_distance)
+    ret_place_ok = collision_check_path(retract_place, robots[plan.place_robot], safe_distance)
     place_ok = collision_check_path(place_path, robots[plan.place_robot], safe_distance)
+
     print(f"start -> pick = {'PASS' if pick_ok else 'FAIL'}")
-    print(f"pick -> handover = {'PASS' if pick_h_ok else 'FAIL'}")
-    print(f"start -> handover = {'PASS' if place_h_ok else 'FAIL'}")
-    print(f"handover -> place = {'PASS' if place_ok else 'FAIL'}")
+    print(f"pick -> pre_handover = {'PASS' if pick_pre_ok else 'FAIL'}")
+    print(f"start -> pre_handover = {'PASS' if place_pre_ok else 'FAIL'}")
+    print(f"advance to handover = {'PASS' if adv_pick_ok and adv_place_ok else 'FAIL'}")
+    print(f"retract to pre_handover = {'PASS' if ret_pick_ok and ret_place_ok else 'FAIL'}")
+    print(f"pre_handover -> place = {'PASS' if place_ok else 'FAIL'}")
+    all_ok = pick_ok and pick_pre_ok and place_pre_ok and adv_pick_ok and adv_place_ok and ret_pick_ok and ret_place_ok and place_ok
     print("\nSTAGE 1 PLAN")
-    print("VALID" if pick_ok and pick_h_ok and place_h_ok and place_ok else "INVALID")
+    print("VALID" if all_ok else "INVALID")
 
 
 if __name__ == "__main__":

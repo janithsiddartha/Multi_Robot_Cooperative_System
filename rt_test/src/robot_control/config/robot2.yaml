@@ -36,6 +36,8 @@
       scale: 0.5
       sign: 1.0
       offset: 0.0
+      finger_axis: "x"
+      approach_axis: "z"
 
     trajectory:
       dt: 0.02

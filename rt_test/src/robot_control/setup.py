@@ -47,7 +47,11 @@ setup(
             'multi_robot_handover_gui = robot_control.gui.multi_robot_handover_gui:main',
             'handover_pose_node = robot_control.nodes.handover_pose_node:main',
             'stage1_gui = robot_control.gui.stage1_gui:main',
+            'stage1_5_gui = robot_control.gui.stage1_5_gui:main',
             'stage2_gui = robot_control.gui.stage2_gui:main',
+            'stage2_5_gui = robot_control.gui.stage2_5_gui:main',
+            'stage3 = robot_control.handover.stage3:main',
+            'stage3_gui = robot_control.gui.stage3_gui:main',
         ],
     },
 )

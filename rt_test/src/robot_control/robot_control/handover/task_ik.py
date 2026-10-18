@@ -7,6 +7,12 @@ from robot_control.handover.handover_ik import (
     validate_pose_solution,
     rotation_matrix_to_quaternion
 )
+from robot_control.handover.object_pick_ik import (
+    solve_object_pick_ik,
+    ObjectPickIKResult,
+    generate_pick_orientations,
+    parse_object_pick_target
+)
 
 @dataclass
 class TaskIKCandidate:
@@ -23,6 +29,10 @@ class TaskIKCandidate:
     yaw: float
     tilt: float
     cost: float = 0.0
+
+    @property
+    def joints_deg(self) -> np.ndarray:
+        return np.rad2deg(self.joints)
 
 def _construct_base_rotation(z_hat: np.ndarray) -> np.ndarray:
     z_hat = z_hat / np.linalg.norm(z_hat)
@@ -83,16 +93,37 @@ def solve_task_ik(
     ori_tolerance_deg: float = 15.0
 ) -> List[TaskIKCandidate]:
     
+    h_cfg = getattr(config, 'handover_cfg', None) or {}
+    auto_ori = h_cfg.get('auto_orientation', {})
+    pose_tols = h_cfg.get('pose_tolerances', {})
+
     if approaches is None:
-        approaches = [
-            (1.0, 0.0, 0.0), (-1.0, 0.0, 0.0),
-            (0.0, 1.0, 0.0), (0.0, -1.0, 0.0),
-            (0.0, 0.0, 1.0), (0.0, 0.0, -1.0)
-        ]
+        cfg_appr = auto_ori.get('approach_directions')
+        if cfg_appr:
+            approaches = [tuple(v) for v in cfg_appr]
+        else:
+            approaches = [
+                (1.0, 0.0, 0.0), (-1.0, 0.0, 0.0),
+                (0.0, 1.0, 0.0), (0.0, -1.0, 0.0),
+                (0.0, 0.0, 1.0), (0.0, 0.0, -1.0)
+            ]
     if yaw_angles_deg is None:
-        yaw_angles_deg = [0, 45, 90, 135, 180, 225, 270, 315]
+        cfg_yaw = auto_ori.get('yaw_angles_deg')
+        if cfg_yaw:
+            yaw_angles_deg = [float(v) for v in cfg_yaw]
+        else:
+            yaw_angles_deg = [0, 45, 90, 135, 180, 225, 270, 315]
     if tilt_angles_deg is None:
-        tilt_angles_deg = [0, 10, -10, 20, -20]
+        cfg_tilt = auto_ori.get('tilt_angles_deg')
+        if cfg_tilt:
+            tilt_angles_deg = [float(v) for v in cfg_tilt]
+        else:
+            tilt_angles_deg = [0, 10, -10, 20, -20]
+
+    if pos_tolerance == 1.0 and 'position_mm' in pose_tols:
+        pos_tolerance = float(pose_tols['position_mm'])
+    if ori_tolerance_deg == 15.0 and 'orientation_deg' in pose_tols:
+        ori_tolerance_deg = float(pose_tols['orientation_deg'])
         
     ori_candidates = generate_orientation_candidates(approaches, yaw_angles_deg, tilt_angles_deg)
     

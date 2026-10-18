@@ -79,7 +79,24 @@ def solve_stage1_ik(
     if not result.get("success"):
         return None
 
-    q_rad = np.asarray(result["q"], dtype=float)
+    sols = result.get("solutions", [])
+    if sols:
+        def _candidate_rank(c):
+            q_c = c["q"]
+            _, T_c = fk(q_c, config)
+            if hasattr(config, "world_base_R"):
+                z_w = config.world_base_R @ T_c[:3, 2]
+            else:
+                z_w = T_c[:3, 2]
+            # Heavily penalize upward approach (+Z) for table pick & place
+            upward_penalty = 5000.0 * max(0.0, float(z_w[2]))
+            return c["score"] + upward_penalty
+
+        best_cand = min(sols, key=_candidate_rank)
+        q_rad = np.asarray(best_cand["q"], dtype=float)
+    else:
+        q_rad = np.asarray(result["q"], dtype=float)
+
     q_deg = np.rad2deg(q_rad)
     achieved, _ = fk(q_rad, config)
     error_mm = float(np.linalg.norm(target_base - achieved))

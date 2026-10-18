@@ -55,6 +55,13 @@ def get_handover_relative_rotations():
         -1: R_minus,
     }
 
+def make_tcp_orientation(z_tcp, phi=0.0):
+    x_obj = np.array([np.cos(phi), np.sin(phi), 0.0])
+    if np.abs(np.dot(normalize(z_tcp), normalize(x_obj))) > 0.99:
+        x_obj = np.array([0.0, np.cos(phi), np.sin(phi)])
+    return make_tilted_tcp_orientation(z_tcp, x_object=x_obj)
+
+
 def make_tilted_tcp_orientation(z_tcp, x_object=[1.0, 0.0, 0.0]):
     """
     Construct TCP rotation matrix given approach direction z_tcp

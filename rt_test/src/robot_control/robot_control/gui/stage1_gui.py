@@ -5,11 +5,13 @@ import tkinter as tk
 
 import numpy as np
 import rclpy
+from rclpy.node import Node
 from ament_index_python.packages import get_package_share_directory
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-from rclpy.node import Node
-from std_msgs.msg import Float64MultiArray
+from tkinter import messagebox
+from std_msgs.msg import Float64MultiArray, String
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 
 from robot_control.handover.stage1 import (
     build_stage1_plan,
@@ -43,6 +45,15 @@ class Stage1GUI(Node):
         self.handover_cfg, self.robots, _ = load_stage1_robots(config_dir)
         self.safe_dist = self.handover_cfg.get('handover', {}).get('safe_distance', 50.0)
 
+        exec_cfg = self.handover_cfg.get('execution', {})
+        timings = exec_cfg.get('timings', {})
+        self.pick_wait_s = float(timings.get('pick_grasp_wait_s', 2.0))
+        self.transfer_wait_s = float(timings.get('handover_transfer_wait_s', 1.0))
+        self.place_wait_s = float(timings.get('place_release_wait_s', 2.0))
+        self.step_interval_s = float(timings.get('step_interval_s', 0.05))
+        self.dwell_time_s = float(timings.get('dwell_time_s', 0.5))
+        self.trajectory_steps = int(exec_cfg.get('trajectory', {}).get('steps', 30))
+
         self.workspace_points = {
             rid: self._get_workspace_points(rid, cfg)
             for rid, cfg in self.robots.items()
@@ -52,6 +63,27 @@ class Stage1GUI(Node):
         self.live_q = {rid: np.zeros(cfg.num_joints) for rid, cfg in self.robots.items()}
         self.current_q = {rid: np.zeros(cfg.num_joints) for rid, cfg in self.robots.items()}
         self.is_simulating = False
+        self.is_real_execution = False
+        self.cached_plan = None
+
+        # ROS Publishers for Real Hardware Control
+        self.publishers_traj = {}
+        self.publishers_mode = {}
+        self.publishers_gripper = {}
+        mode_qos = QoSProfile(
+            depth=1, reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL
+        )
+        for rid in self.robots.keys():
+            self.publishers_traj[rid] = self.create_publisher(
+                Float64MultiArray, f'/{rid}/trajectory_joint_command', 10
+            )
+            self.publishers_mode[rid] = self.create_publisher(
+                String, f'/{rid}/control_mode', mode_qos
+            )
+            self.publishers_gripper[rid] = self.create_publisher(
+                Float64MultiArray, f'/{rid}/trajectory_gripper_command', 10
+            )
         
         # ROS Subscribers
         self.subs = []
@@ -65,6 +97,26 @@ class Stage1GUI(Node):
         self._last_visualization_signature = None
         self._init_scene()
         self.root.after(50, self._refresh_visualization)
+
+    def _send_joint_command(self, rid, q_deg, real_robot=False):
+        if real_robot and rid in self.publishers_traj:
+            msg = Float64MultiArray()
+            msg.data = [float(v) for v in q_deg]
+            self.publishers_traj[rid].publish(msg)
+
+    def _set_control_mode(self, rid, mode_str, real_robot=False):
+        if real_robot and rid in self.publishers_mode:
+            msg = String()
+            msg.data = mode_str
+            self.publishers_mode[rid].publish(msg)
+
+    def _send_gripper_command(self, rid, state, real_robot=False):
+        if real_robot and rid in self.publishers_gripper:
+            cfg = self.robots.get(rid)
+            angle = getattr(cfg, f"gripper_{state}", 55.0 if state == 'close' else -55.0)
+            msg = Float64MultiArray()
+            msg.data = [float(angle)]
+            self.publishers_gripper[rid].publish(msg)
         
     def _joint_cb(self, msg, rid):
         if len(msg.data) == self.robots[rid].num_joints:
@@ -83,7 +135,26 @@ class Stage1GUI(Node):
         )
         low = np.min(base_positions, axis=0) - max_reach
         high = np.max(base_positions, axis=0) + max_reach
-        return tuple((float(low[i]), float(high[i])) for i in range(3))
+
+        # Read z_min from handover.yaml (visualization.z_min), defaulting to base_z - 50.0.
+        # Supports values like -50.0, 0.0, or 50 (margin below base).
+        min_base_z = float(np.min(base_positions[:, 2]))
+        raw_z_min = self.handover_cfg.get('visualization', {}).get('z_min', None)
+        if raw_z_min is not None:
+            val = float(raw_z_min)
+            if val > min_base_z:
+                z_min = min_base_z - val
+            else:
+                z_min = val
+        else:
+            z_min = min_base_z - 50.0
+        z_max = float(high[2])
+
+        return (
+            (float(low[0]), float(high[0])),
+            (float(low[1]), float(high[1])),
+            (z_min, z_max),
+        )
 
     def _refresh_visualization(self):
         """Refresh from Tk's main thread, like the robot test GUIs."""
@@ -146,9 +217,53 @@ class Stage1GUI(Node):
         self.log_text = tk.Text(left_frame, height=20, bg="#FFFFFF", fg="#333333", font=("Consolas", 9), relief="solid", bd=1)
         self.log_text.pack(fill="both", expand=True, pady=10)
         
-        # EXECUTE BUTTON
-        btn = tk.Button(left_frame, text="EXECUTE STAGE 1", font=("Helvetica", 12, "bold"), bg=self.accent_color, fg=self.text_color, command=self._on_execute)
-        btn.pack(fill="x", pady=10)
+        # ACTION BUTTONS (SIMULATE VS EXECUTE REAL)
+        action_frame = tk.Frame(left_frame, bg=self.bg_color)
+        action_frame.pack(fill="x", pady=8)
+
+        self.plan_status_lbl = tk.Label(
+            action_frame, text="Plan Status: Not simulated yet",
+            font=("Helvetica", 8, "italic"), bg=self.bg_color, fg="#7F8C8D"
+        )
+        self.plan_status_lbl.pack(pady=(0, 6))
+
+        self.sim_btn = tk.Button(
+            action_frame, text="▶ SIMULATE (3D VISUALIZER ONLY)",
+            font=("Helvetica", 10, "bold"), bg="#17A2B8", fg="#FFFFFF",
+            activebackground="#138496", activeforeground="#FFFFFF",
+            relief="flat", cursor="hand2", padx=6, pady=8,
+            command=self._on_simulate
+        )
+        self.sim_btn.pack(fill="x", pady=(0, 6))
+
+        self.exec_btn = tk.Button(
+            action_frame, text="⚡ EXECUTE (REAL ROBOT)",
+            font=("Helvetica", 10, "bold"), bg="#28A745", fg="#FFFFFF",
+            activebackground="#218838", activeforeground="#FFFFFF",
+            relief="flat", cursor="hand2", padx=6, pady=8,
+            command=self._on_execute_real
+        )
+        self.exec_btn.pack(fill="x")
+
+        def _on_target_change(event=None):
+            if self.cached_plan is not None:
+                try:
+                    cur_p = tuple(float(x.strip()) for x in self.pick_entry.get().split(','))
+                    cur_pl = tuple(float(x.strip()) for x in self.place_entry.get().split(','))
+                    if (cur_p, cur_pl) == self.cached_plan.get('target_key'):
+                        self.plan_status_lbl.config(
+                            text="✓ Simulation verified & cached for instant execution",
+                            fg="#27AE60"
+                        )
+                        return
+                except Exception:
+                    pass
+                self.plan_status_lbl.config(
+                    text="Targets modified (Simulate recommended)",
+                    fg="#E67E22"
+                )
+        self.pick_entry.bind("<KeyRelease>", _on_target_change)
+        self.place_entry.bind("<KeyRelease>", _on_target_change)
         
         # RIGHT FRAME (MATPLOTLIB)
         right_frame = tk.Frame(self.root, bg=self.bg_color)
@@ -171,6 +286,18 @@ class Stage1GUI(Node):
             return
         self.log_text.insert(tk.END, msg + "\n")
         self.log_text.see(tk.END)
+
+    def _set_status_lbl(self, text, fg):
+        if threading.current_thread() is not threading.main_thread():
+            try:
+                self.root.after(0, self._set_status_lbl, text, fg)
+            except tk.TclError:
+                pass
+            return
+        try:
+            self.plan_status_lbl.config(text=text, fg=fg)
+        except tk.TclError:
+            pass
 
     def _get_workspace_points(self, rid, cfg):
         # Sparse approximation of workspace
@@ -342,15 +469,33 @@ class Stage1GUI(Node):
         ready.wait()
         return chosen[0]
 
-    def _on_execute(self):
+    def _on_simulate(self):
+        if self.is_simulating:
+            return
         self.log_text.delete(1.0, tk.END)
-        threading.Thread(target=self._run_plan_thread, daemon=True).start()
+        threading.Thread(target=self._run_plan_thread, args=(False,), daemon=True).start()
+
+    def _on_execute_real(self):
+        if self.is_simulating:
+            return
+        confirm = messagebox.askyesno(
+            "Confirm Real Robot Execution",
+            "Are you sure you want to send trajectory commands to the REAL physical robot hardware?\n\nPlease confirm that the robot workspace is clear of obstacles."
+        )
+        if not confirm:
+            return
+        self.log_text.delete(1.0, tk.END)
+        threading.Thread(target=self._run_plan_thread, args=(True,), daemon=True).start()
 
     def _chooser(self, label, robot_ids):
         return self._ask_user_choice(f"Select {label} robot", robot_ids)
 
-    def _run_plan_thread(self):
+    def _run_plan_thread(self, real_robot=False):
         self._log("=== STARTING STAGE 1 ===")
+        if real_robot:
+            self._log("[MODE: REAL ROBOT EXECUTION] Sending trajectory to hardware via ROS topics!")
+        else:
+            self._log("[MODE: SIMULATION ONLY] Visualizer 3D preview active - Physical robot commands DISABLED.")
         self._log("IK: stage1_ik (XYZ only, same as ik_solver)")
 
         try:
@@ -360,95 +505,211 @@ class Stage1GUI(Node):
             self._log("ERROR: Invalid Pick/Place Coordinates.")
             return
 
+        target_key = (tuple(pick_xyz), tuple(place_xyz))
+        can_reuse = (
+            self.cached_plan is not None
+            and self.cached_plan.get('target_key') == target_key
+        )
+
         current_q = {rid: q.copy() for rid, q in self.live_q.items()}
 
-        try:
-            plan, pick_opts, place_opts = build_stage1_plan(
-                pick_xyz,
-                place_xyz,
-                self.robots,
-                self.handover_cfg,
-                chooser=self._chooser,
-                current_q_deg=current_q,
-            )
-        except RuntimeError as exc:
-            self._log(f"ERROR: {exc}")
-            return
-
-        self._log(f"\nPICK {pick_xyz} is in workspace of: {', '.join(pick_opts)}")
-        for rid, sol in pick_opts.items():
-            self._log(f"  {rid}: reachable, one XYZ pose selected (error={sol.error_mm:.3f} mm)")
-        if len(pick_opts) == 1:
-            self._log(f"> Auto-selected PICK: {plan.pick_robot}")
+        if real_robot and can_reuse:
+            self._log("\n⚡ [REUSING SIMULATED PLAN] Target coordinates match last simulation!")
+            self._log("⚡ Skipping IK calculation & robot selection dialog.")
+            self._log("⚡ Directly executing pre-computed verified trajectory on physical hardware...")
+            cached = self.cached_plan
+            plan = cached['plan']
+            pick_rid = cached['pick_rid']
+            place_rid = cached['place_rid']
+            pick_path = cached['pick_path']
+            place_path = cached['place_path']
+            pick_home_path = cached['pick_home_path']
+            place_home_path = cached.get('place_home_path')
+            if plan.needs_handover:
+                pick_to_pre_path = cached['pick_to_pre_path']
+                place_to_pre_path = cached['place_to_pre_path']
+                pick_pre_to_h_path = cached['pick_pre_to_h_path']
+                place_pre_to_h_path = cached['place_pre_to_h_path']
+                pick_h_to_pre_path = cached['pick_h_to_pre_path']
+                place_h_to_pre_path = cached['place_h_to_pre_path']
         else:
-            self._log(f"> Selected PICK: {plan.pick_robot}")
-        self._log(f"  q_deg = {np.round(plan.pick.q_deg, 2)}")
+            try:
+                plan, pick_opts, place_opts = build_stage1_plan(
+                    pick_xyz,
+                    place_xyz,
+                    self.robots,
+                    self.handover_cfg,
+                    chooser=self._chooser,
+                    current_q_deg=current_q,
+                )
+            except RuntimeError as exc:
+                self._log(f"ERROR: {exc}")
+                return
 
-        self._log(f"\nPLACE {place_xyz} is in workspace of: {', '.join(place_opts)}")
-        for rid, sol in place_opts.items():
-            self._log(f"  {rid}: reachable, one XYZ pose selected (error={sol.error_mm:.3f} mm)")
-        if len(place_opts) == 1:
-            self._log(f"> Auto-selected PLACE: {plan.place_robot}")
-        else:
-            self._log(f"> Selected PLACE: {plan.place_robot}")
-        self._log(f"  q_deg = {np.round(plan.place.q_deg, 2)}")
+            self._log(f"\nPICK {pick_xyz} is in workspace of: {', '.join(pick_opts)}")
+            for rid, sol in pick_opts.items():
+                self._log(f"  {rid}: reachable, one XYZ pose selected (error={sol.error_mm:.3f} mm)")
+            if len(pick_opts) == 1:
+                self._log(f"> Auto-selected PICK: {plan.pick_robot}")
+            else:
+                self._log(f"> Selected PICK: {plan.pick_robot}")
+            self._log(f"  q_deg = {np.round(plan.pick.q_deg, 2)}")
 
-        pick_rid = plan.pick_robot
-        place_rid = plan.place_robot
-        pick_q = plan.pick.q_deg
-        place_q = plan.place.q_deg
+            self._log(f"\nPLACE {place_xyz} is in workspace of: {', '.join(place_opts)}")
+            for rid, sol in place_opts.items():
+                self._log(f"  {rid}: reachable, one XYZ pose selected (error={sol.error_mm:.3f} mm)")
+            if len(place_opts) == 1:
+                self._log(f"> Auto-selected PLACE: {plan.place_robot}")
+            else:
+                self._log(f"> Selected PLACE: {plan.place_robot}")
+            self._log(f"  q_deg = {np.round(plan.place.q_deg, 2)}")
 
-        self._log("\nPreparing motion paths...")
+            pick_rid = plan.pick_robot
+            place_rid = plan.place_robot
+            pick_q = plan.pick.q_deg
+            place_q = plan.place.q_deg
+
+            self._log("\nPreparing motion paths...")
+            start_pick_q = current_q[pick_rid].copy()
+            start_place_q = current_q[place_rid].copy()
+            pick_path = generate_interpolated_path(start_pick_q, pick_q, steps=30)
+
+            if plan.needs_handover:
+                pick_h_q = plan.pick_handover_q
+                place_h_q = plan.place_handover_q
+                pick_pre_h_q = plan.pick_pre_handover_q if plan.pick_pre_handover_q is not None else pick_h_q
+                place_pre_h_q = plan.place_pre_handover_q if plan.place_pre_handover_q is not None else place_h_q
+
+                self._log(f"\nHANDOVER {pick_rid} <-> {place_rid} (from handover.yaml)")
+                self._log(f"  {pick_rid}_pre_q = {pick_pre_h_q}")
+                self._log(f"  {place_rid}_pre_q = {place_pre_h_q}")
+                self._log(f"  {pick_rid}_q = {pick_h_q}")
+                self._log(f"  {place_rid}_q = {place_h_q}")
+
+                pick_to_pre_path = generate_interpolated_path(pick_q, pick_pre_h_q, steps=25)
+                place_to_pre_path = generate_interpolated_path(start_place_q, place_pre_h_q, steps=25)
+                pick_pre_to_h_path = generate_interpolated_path(pick_pre_h_q, pick_h_q, steps=20)
+                place_pre_to_h_path = generate_interpolated_path(place_pre_h_q, place_h_q, steps=20)
+                pick_h_to_pre_path = generate_interpolated_path(pick_h_q, pick_pre_h_q, steps=20)
+                place_h_to_pre_path = generate_interpolated_path(place_h_q, place_pre_h_q, steps=20)
+                place_path = generate_interpolated_path(place_pre_h_q, place_q, steps=30)
+                pick_home_path = generate_interpolated_path(pick_pre_h_q, np.zeros(self.robots[pick_rid].num_joints), steps=20)
+                place_home_path = generate_interpolated_path(place_q, np.zeros(self.robots[place_rid].num_joints), steps=20)
+
+                self.cached_plan = {
+                    'target_key': target_key,
+                    'plan': plan,
+                    'pick_rid': pick_rid,
+                    'place_rid': place_rid,
+                    'pick_path': pick_path,
+                    'pick_to_pre_path': pick_to_pre_path,
+                    'place_to_pre_path': place_to_pre_path,
+                    'pick_pre_to_h_path': pick_pre_to_h_path,
+                    'place_pre_to_h_path': place_pre_to_h_path,
+                    'pick_h_to_pre_path': pick_h_to_pre_path,
+                    'place_h_to_pre_path': place_h_to_pre_path,
+                    'place_path': place_path,
+                    'pick_home_path': pick_home_path,
+                    'place_home_path': place_home_path,
+                }
+            else:
+                self._log("\nSame robot for pick and place — skipping handover.")
+                place_path = generate_interpolated_path(pick_q, place_q, steps=30)
+                pick_home_path = generate_interpolated_path(place_q, np.zeros(self.robots[pick_rid].num_joints), steps=20)
+                place_home_path = None
+
+                self.cached_plan = {
+                    'target_key': target_key,
+                    'plan': plan,
+                    'pick_rid': pick_rid,
+                    'place_rid': place_rid,
+                    'pick_path': pick_path,
+                    'place_path': place_path,
+                    'pick_home_path': pick_home_path,
+                    'place_home_path': None,
+                }
+
         self.is_simulating = True
+        self.is_real_execution = real_robot
         self.current_q = {k: v.copy() for k, v in self.live_q.items()}
 
-        start_pick_q = self.current_q[pick_rid].copy()
-        start_place_q = self.current_q[place_rid].copy()
-        pick_path = generate_interpolated_path(start_pick_q, pick_q, steps=30)
-
+        # Set hardware control mode to TRAJECTORY if commanding real robots
+        self._set_control_mode(pick_rid, 'TRAJECTORY', real_robot=real_robot)
         if plan.needs_handover:
-            pick_h_q = plan.pick_handover_q
-            place_h_q = plan.place_handover_q
-            self._log(f"\nHANDOVER {pick_rid} <-> {place_rid} (from handover.yaml)")
-            self._log(f"  {pick_rid}_q = {pick_h_q}")
-            self._log(f"  {place_rid}_q = {place_h_q}")
-            pick_handover_path = generate_interpolated_path(pick_q, pick_h_q, steps=30)
-            place_handover_path = generate_interpolated_path(start_place_q, place_h_q, steps=30)
-            place_path = generate_interpolated_path(place_h_q, place_q, steps=30)
-        else:
-            self._log("\nSame robot for pick and place — skipping handover.")
-            pick_handover_path = None
-            place_handover_path = None
-            place_path = generate_interpolated_path(pick_q, place_q, steps=30)
-        self._log("\n=== EXECUTING SEQUENTIAL PLAN ===")
+            self._set_control_mode(place_rid, 'TRAJECTORY', real_robot=real_robot)
 
-        def animate_path(rid, path, label, wait_time=0.5):
+        self._log("\n=== EXECUTING PLAN WITH PRE-HANDOVER ===")
+
+        def animate_path(rid, path, label, wait_time=None):
+            wait_time = self.dwell_time_s if wait_time is None else wait_time
             self._log(label)
             for q in path:
                 self.current_q[rid] = q
-                time.sleep(0.05)
+                self._send_joint_command(rid, q, real_robot=real_robot)
+                self.root.after(0, self._update_3d)
+                time.sleep(self.step_interval_s)
             time.sleep(wait_time)
 
-        animate_path(pick_rid, pick_path, f"1. {pick_rid} moves to Pick...", 0.5)
-        self._log(f"2. {pick_rid} waits 2s, closes gripper.")
-        time.sleep(2)
+        def animate_sync_path(path_a, path_b, label, wait_time=None):
+            wait_time = self.dwell_time_s if wait_time is None else wait_time
+            self._log(label)
+            for qa, qb in zip(path_a, path_b):
+                self.current_q[pick_rid] = qa
+                self.current_q[place_rid] = qb
+                self._send_joint_command(pick_rid, qa, real_robot=real_robot)
+                self._send_joint_command(place_rid, qb, real_robot=real_robot)
+                self.root.after(0, self._update_3d)
+                time.sleep(self.step_interval_s)
+            time.sleep(wait_time)
+
+        animate_path(pick_rid, pick_path, f"1. {pick_rid} moves to Pick...", self.dwell_time_s)
+        self._log(f"2. {pick_rid} waits {self.pick_wait_s}s, closes gripper.")
+        self._send_gripper_command(pick_rid, 'close', real_robot=real_robot)
+        time.sleep(self.pick_wait_s)
 
         if plan.needs_handover:
-            animate_path(pick_rid, pick_handover_path, f"3. {pick_rid} moves to handover.", 0.5)
-            animate_path(place_rid, place_handover_path, f"4. {place_rid} moves to handover.", 0.5)
-            self._log(f"5. Transfer: {place_rid} closes, {pick_rid} opens.")
-            time.sleep(1)
-            animate_path(place_rid, place_path, f"6. {place_rid} moves to Place...", 0.5)
-            self._log(f"7. {place_rid} waits 2s, releases object.")
+            animate_path(pick_rid, pick_to_pre_path, f"3. {pick_rid} moves to Pre-Handover.", self.dwell_time_s)
+            animate_path(place_rid, place_to_pre_path, f"4. {place_rid} moves to Pre-Handover.", self.dwell_time_s)
+            animate_sync_path(
+                pick_pre_to_h_path, place_pre_to_h_path,
+                f"5. Advance: Both robots move Pre-Handover -> Handover at same rate.", self.dwell_time_s
+            )
+            self._log(f"6. Transfer: {place_rid} closes gripper, {pick_rid} opens gripper.")
+            self._send_gripper_command(place_rid, 'close', real_robot=real_robot)
+            self._send_gripper_command(pick_rid, 'open', real_robot=real_robot)
+            time.sleep(self.transfer_wait_s)
+            animate_sync_path(
+                pick_h_to_pre_path, place_h_to_pre_path,
+                f"7. Retract: Both robots back away to Pre-Handover at same rate.", self.dwell_time_s
+            )
+            animate_path(place_rid, place_path, f"8. {place_rid} moves to Place...", self.dwell_time_s)
+            self._log(f"9. {place_rid} waits {self.place_wait_s}s, releases object.")
+            self._send_gripper_command(place_rid, 'open', real_robot=real_robot)
+            time.sleep(self.place_wait_s)
+            animate_path(pick_rid, pick_home_path, f"10. {pick_rid} returns Home.", 0.2)
+            animate_path(place_rid, place_home_path, f"11. {place_rid} returns Home.", self.dwell_time_s)
         else:
-            animate_path(pick_rid, place_path, f"3. {pick_rid} moves to Place...", 0.5)
-            self._log(f"4. {pick_rid} waits 2s, releases object.")
-        time.sleep(2)
+            animate_path(pick_rid, place_path, f"3. {pick_rid} moves to Place...", self.dwell_time_s)
+            self._log(f"4. {pick_rid} waits {self.place_wait_s}s, releases object.")
+            self._send_gripper_command(pick_rid, 'open', real_robot=real_robot)
+            time.sleep(self.place_wait_s)
+            animate_path(pick_rid, pick_home_path, f"5. {pick_rid} returns Home.", self.dwell_time_s)
 
         self.current_q[pick_rid] = np.zeros(self.robots[pick_rid].num_joints)
         self.current_q[place_rid] = np.zeros(self.robots[place_rid].num_joints)
 
+        # Reset hardware mode back to MANUAL
+        self._set_control_mode(pick_rid, 'MANUAL', real_robot=real_robot)
+        if plan.needs_handover:
+            self._set_control_mode(place_rid, 'MANUAL', real_robot=real_robot)
+
         self._log("=== STAGE 1 SUCCESS ===")
+        if not real_robot:
+            self._set_status_lbl("✓ Simulation verified & cached for instant execution", "#27AE60")
+            self._log("\n[READY] Click '⚡ EXECUTE (REAL ROBOT)' to directly run this exact plan on hardware without recalculating!")
+        else:
+            self._set_status_lbl("✓ Real robot execution completed", "#28A745")
+
         self.is_simulating = False
 
 def main(args=None):
