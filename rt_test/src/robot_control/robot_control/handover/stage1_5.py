@@ -278,6 +278,8 @@ def generate_cartesian_corridor_trajectory(
             qs_deg.append(q_sol)
 
         if has_continuous_pre:
+            qs_deg[0] = q_pre_deg.copy()
+            qs_deg[-1] = q_H_deg.copy()
             max_step = max(np.max(np.abs(qs_deg[i] - qs_deg[i - 1])) for i in range(1, steps))
             if max_step <= max_joint_step_deg:
                 return True, qs_deg, "Success (seeded from continuous pre-handover)"
@@ -302,6 +304,9 @@ def generate_cartesian_corridor_trajectory(
         qs_backward.append(q_cur.copy())
 
     approach_qs_deg = list(reversed(qs_backward))
+    if q_pre_deg is not None and np.max(np.abs(q_pre_deg - approach_qs_deg[0])) < 5.0:
+        approach_qs_deg[0] = q_pre_deg.copy()
+    approach_qs_deg[-1] = q_H_deg.copy()
     return True, approach_qs_deg, "Success (backwards continuous corridor)"
 
 
@@ -599,19 +604,23 @@ def plan_stage1_5_synchronized_paths(
     if standoff_place < 1.0:
         standoff_place = float(h_cfg.get('handover', {}).get('standoff_distance_mm', 50.0))
 
-    ok_pick, raw_p4_pick, msg_pick = generate_cartesian_corridor_trajectory(
-        pick_rid, cfg_pick, pick_h_q, q_pre_deg=pick_pre_h_q, standoff_mm=standoff_pick, steps=steps
-    )
-    ok_place, raw_p4_place, msg_place = generate_cartesian_corridor_trajectory(
-        place_rid, cfg_place, place_h_q, q_pre_deg=place_pre_h_q, standoff_mm=standoff_place, steps=steps
-    )
-
-    if not ok_pick:
+    corridor_required = getattr(plan, "use_auto_handover", None) is not None
+    if corridor_required:
+        ok_pick, raw_p4_pick, msg_pick = generate_cartesian_corridor_trajectory(
+            pick_rid, cfg_pick, pick_h_q, q_pre_deg=pick_pre_h_q, standoff_mm=standoff_pick, steps=steps
+        )
+        ok_place, raw_p4_place, msg_place = generate_cartesian_corridor_trajectory(
+            place_rid, cfg_place, place_h_q, q_pre_deg=place_pre_h_q, standoff_mm=standoff_place, steps=steps
+        )
+        if not ok_pick:
+            raw_p4_pick = generate_interpolated_path(pick_pre_h_q, pick_h_q, steps=steps)
+        if not ok_place:
+            raw_p4_place = generate_interpolated_path(place_pre_h_q, place_h_q, steps=steps)
+        corridor_valid = ok_pick and ok_place
+    else:
         raw_p4_pick = generate_interpolated_path(pick_pre_h_q, pick_h_q, steps=steps)
-    if not ok_place:
         raw_p4_place = generate_interpolated_path(place_pre_h_q, place_h_q, steps=steps)
-
-    corridor_valid = ok_pick and ok_place
+        corridor_valid = True
     phase4_steps = []
     min_p4_clearance = float("inf")
 
@@ -660,36 +669,83 @@ def plan_stage1_5_synchronized_paths(
     # ─────────────────────────────────────────────────────────────
     # PHASE 7: PRE-HANDOVER TO PLACE TARGET
     # Robot 2: place_pre_h_q -> place_target_q
-    # Robot 1: waiting stationed at pick_pre_h_q
+    # Robot 1: waiting stationed at pick_pre_h_q (or designated safe waiting pose)
     # ─────────────────────────────────────────────────────────────
     raw_p7_place = generate_interpolated_path(place_pre_h_q, place_target_q, steps=steps)
     phase7_steps = []
     min_p7_clearance = float("inf")
 
+    # Check if keeping pick_robot waiting at pick_pre_h_q is safe
+    p7_stationed_safe = True
     for q_pl in raw_p7_place:
         c = compute_min_body_clearance(pick_pre_h_q, cfg_pick, q_pl, cfg_place, exclude_tcp=False)
-        if c < min_p7_clearance:
-            min_p7_clearance = c
-        phase7_steps.append(
-            Stage1_5Step(
-                name="phase7_handover_to_place",
-                pick_q=pick_pre_h_q,
-                place_q=q_pl,
-                min_clearance_mm=c,
-                is_safe=c >= safe_distance,
-                description=f"{place_rid} moving from Pre-Handover to Place ({pick_rid} waiting at Pre-Handover)",
+        if c < safe_distance:
+            p7_stationed_safe = False
+            break
+
+    home_pick = np.zeros(cfg_pick.num_joints)
+    if p7_stationed_safe:
+        pick_end_q_p7 = pick_pre_h_q
+        for q_pl in raw_p7_place:
+            c = compute_min_body_clearance(pick_pre_h_q, cfg_pick, q_pl, cfg_place, exclude_tcp=False)
+            if c < min_p7_clearance:
+                min_p7_clearance = c
+            phase7_steps.append(
+                Stage1_5Step(
+                    name="phase7_handover_to_place",
+                    pick_q=pick_pre_h_q,
+                    place_q=q_pl,
+                    min_clearance_mm=c,
+                    is_safe=c >= safe_distance,
+                    description=f"{place_rid} moving from Pre-Handover to Place ({pick_rid} waiting at Pre-Handover)",
+                )
             )
-        )
+    else:
+        # Move pick_robot to validated safe waiting pose (home_pick) first
+        raw_p7_pick_retire = generate_interpolated_path(pick_pre_h_q, home_pick, steps=steps)
+        collision_avoidance_applied = True
+        pick_end_q_p7 = home_pick
+
+        # Step 1: pick_robot retires to safe waiting pose while place_robot waits at pre-handover
+        for q_p in raw_p7_pick_retire:
+            c = compute_min_body_clearance(q_p, cfg_pick, place_pre_h_q, cfg_place, exclude_tcp=False)
+            if c < min_p7_clearance:
+                min_p7_clearance = c
+            phase7_steps.append(
+                Stage1_5Step(
+                    name="phase7_handover_to_place",
+                    pick_q=q_p,
+                    place_q=place_pre_h_q,
+                    min_clearance_mm=c,
+                    is_safe=c >= safe_distance,
+                    description=f"{pick_rid} moving to safe waiting pose ({place_rid} waiting at Pre-Handover)",
+                )
+            )
+
+        # Step 2: place_robot moves to place target while pick_robot waits at safe waiting pose
+        for q_pl in raw_p7_place:
+            c = compute_min_body_clearance(home_pick, cfg_pick, q_pl, cfg_place, exclude_tcp=False)
+            if c < min_p7_clearance:
+                min_p7_clearance = c
+            phase7_steps.append(
+                Stage1_5Step(
+                    name="phase7_handover_to_place",
+                    pick_q=home_pick,
+                    place_q=q_pl,
+                    min_clearance_mm=c,
+                    is_safe=c >= safe_distance,
+                    description=f"{place_rid} moving from Pre-Handover to Place ({pick_rid} waiting at safe pose)",
+                )
+            )
 
     # ─────────────────────────────────────────────────────────────
     # PHASE 9: INDEPENDENT RETURN HOME WITH COLLISION-AWARE SCHEDULING
-    # Robot 1: pick_pre_h_q -> 0
+    # Robot 1: pick_end_q_p7 -> 0
     # Robot 2: place_target_q -> 0
     # ─────────────────────────────────────────────────────────────
-    home_pick = np.zeros(cfg_pick.num_joints)
     home_place = np.zeros(cfg_place.num_joints)
     phase9_steps, min_p9_clearance, p9_avoided = schedule_collision_aware_motion(
-        start_pick_q=pick_pre_h_q,
+        start_pick_q=pick_end_q_p7,
         target_pick_q=home_pick,
         start_place_q=place_target_q,
         target_place_q=home_place,

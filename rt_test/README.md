@@ -8,12 +8,13 @@ An advanced multi-robot coordination and manipulation framework developed in ROS
 
 1. [System Overview & Manipulators](#1-system-overview--manipulators)
 2. [Software Architecture & Control Planes](#2-software-architecture--control-planes)
-3. [Evolution of Stages (1, 1.5, 2, 2.5)](#3-evolution-of-stages)
-4. [Configuration System](#4-configuration-system)
-5. [Installation & Build Instructions](#5-installation--build-instructions)
-6. [How to Run & GUI Operation Guide](#6-how-to-run--gui-operation-guide)
-7. [ROS 2 Interface & Topics](#7-ros-2-interface--topics)
-8. [Automated Test Suite](#8-automated-test-suite)
+3. [Evolution of Stages (1, 1.5, 2, 2.5, 3, 3-Test)](#3-evolution-of-stages)
+4. [Stage 3 Test: Final Operational Version](#4-stage-3-test-final-operational-version)
+5. [Configuration System](#5-configuration-system)
+6. [Installation & Build Instructions](#6-installation--build-instructions)
+7. [How to Run & GUI Operation Guide](#7-how-to-run--gui-operation-guide)
+8. [ROS 2 Interface & Topics](#8-ros-2-interface--topics)
+9. [Automated Test Suite](#9-automated-test-suite)
 
 ---
 
@@ -60,31 +61,32 @@ The workcell comprises three heterogeneous articulated robotic arms mounted arou
 The software stack separates planning, coordination, simulation, and hardware transmission into clean decoupled planes:
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        GUI & VISUALIZATION PLANE                       │
-│    Stage 1 GUI  │  Stage 1.5 GUI  │  Stage 2 GUI  │  Stage 2.5 GUI     │
-│   • 3D Matplotlib Visualizer (Robot Links, TCP Frames, Point Clouds)   │
-│   • Workspace Clouds • Real-time Clearance Monitor • Safe Preview      │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Plan / Simulate / Execute
-┌───────────────────────────────────▼────────────────────────────────────┐
-│                        MOTION PLANNING ENGINE                          │
-│   • Target Parsing & Normalization (XYZ mm, Yaw [0, 360)°)             │
-│   • Stage 2.5 Object-Pose IK & Adaptive Approach Tilt Solver           │
-│   • Stage 2 6D Orientation Error Formulations                          │
-│   • Stage 1.5 Whole-Body Link-to-Link Collision Distance Engine        │
-│   • Stage 1 Damped Least-Squares Position IK & Multi-Start Multi-Robot │
-│   • Zero-Recalculation Plan Caching Engine                             │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Trajectory Stream
-┌───────────────────────────────────▼────────────────────────────────────┐
-│                        ROS 2 HARDWARE INTERFACE                        │
-│   • Topic Multiplexers (command_mux, gripper_mux)                      │
-│   • Joint Command Publishers (`/robotX/joint_commands`)                │
-│   • Gripper Command Publishers (`/robotX/gripper_command`)             │
-│   • UART Serial Bridge Nodes (`uart_node`)                             │
-│   • ESP32 Firmware Execution via PCA9685                               │
-└────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                               GUI & VISUALIZATION PLANE                                │
+│    Stage 1 GUI  │  Stage 1.5 GUI  │  Stage 2 GUI  │  Stage 2.5 GUI  │ Stage 3 Test GUI │
+│   • 3D Matplotlib Visualizer (Robot Links, TCP Frames, Point Clouds)                   │
+│   • Multi-Robot Handover Inspector • Live Clearance Gauge • Interactive Robot Chooser  │
+└───────────────────────────────────────────┬────────────────────────────────────────────┘
+                                            │ Plan / Simulate / Execute
+┌───────────────────────────────────────────▼────────────────────────────────────────────┐
+│                                MOTION PLANNING ENGINE                                  │
+│   • Target Parsing & Normalization (XYZ mm, Yaw [0, 360)°)                             │
+│   • Stage 2.5 Object-Pose IK & Adaptive Approach Tilt Solver                           │
+│   • Stage 3 Kinematic Handover Solver (Voxel Workspace Overlap & SO(3) Mating)         │
+│   • Stage 3 Test Strategy Dispatch: TOP_OF_WORKSPACE vs CENTER_OF_WORKSPACE            │
+│   • Approach Strategy Coordination: DUAL_SYNCHRONIZED vs ASYMMETRIC                    │
+│   • Stage 2.5 Trajectory Engine: Cartesian TCP Z Corridors & Exclude-TCP Clearance     │
+│   • High-Performance Two-Tier Disk Caching (< 1 ms Recall with Robot Chooser)          │
+└───────────────────────────────────────────┬────────────────────────────────────────────┘
+                                            │ Trajectory Stream
+┌───────────────────────────────────────────▼────────────────────────────────────────────┐
+│                                ROS 2 HARDWARE INTERFACE                                │
+│   • Topic Multiplexers (command_mux, gripper_mux)                                      │
+│   • Joint Command Publishers (`/robotX/joint_commands`)                                │
+│   • Gripper Command Publishers (`/robotX/gripper_command`)                             │
+│   • UART Serial Bridge Nodes (`uart_node`)                                             │
+│   • ESP32 Firmware Execution via PCA9685                                               │
+└────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Dual-Execution Architecture
@@ -95,15 +97,15 @@ The software stack separates planning, coordination, simulation, and hardware tr
    - **Hardware output is strictly disabled** (no serial commands sent to physical robots).
    - Generates and verifies collision clearance; caches the verified plan.
 2. **EXECUTE (Real Robot)**:
-   - Reuses the cached simulation plan if coordinates match (**saving ~20 seconds** of re-computation).
-   - Prompts a safety confirmation dialog.
+   - Evaluates hardware readiness and verified joint states.
+   - Prompts a safety confirmation dialog before moving physical arms.
    - Streams synchronized trajectory waypoints to `/joint_commands` and `/gripper_command` topics at configured step intervals.
 
 ---
 
 ## 3. Evolution of Stages
 
-The framework is structured into four progressive stages, each addressing higher levels of manipulation autonomy and geometric fidelity.
+The framework is structured into progressive stages, each addressing higher levels of manipulation autonomy and geometric fidelity:
 
 ### Stage 1: Basic Pick-and-Place with Manual Handover
 - **Inverse Kinematics**: Numerical Damped Least Squares (DLS) Position IK reaching 3D Cartesian coordinates $(X, Y, Z)$.
@@ -119,18 +121,52 @@ The framework is structured into four progressive stages, each addressing higher
 - **Full Pose Control**: Simultaneously solves for position $(X, Y, Z)$ and end-effector 3D orientation matrix $R \in \text{SO}(3)$ using rotation error vectors.
 - **Handover Alignment**: Computes opposing gripper orientations where robot grippers align face-to-face along complementary axes during transfer.
 
-### Stage 2.5: Object-Pose IK & Synchronized Handover (Latest)
+### Stage 2.5: Object-Pose IK & Synchronized Handover
 - **Object-Target Specification**: User provides object target position $(X, Y, Z)$ and optional table yaw angle $\psi$ (default: $0.0^\circ$).
-- **Adaptive Approach Tilt ($\tau$)**: Evaluates candidate tilt angles from $[0.0^\circ, \pm 10^\circ, \pm 20^\circ, \dots, \pm 90^\circ]$ to find reachable solutions while preferring top-down picking.
+- **Adaptive Approach Tilt ($\tau$)**: Evaluates candidate tilt angles from $[0.0^\circ, \pm 10^\circ, \dots, \pm 90^\circ]$ preferring top-down picking.
 - **Configurable Gripper Finger Axis**: Supports grippers mounted along either local $X$ or local $Y$ (`finger_axis: "x" | "y"`).
-- **5-DOF Task-Priority Nullspace IK**: Cartesian position is solved as the hard primary task; finger-axis yaw alignment is projected into the position nullspace as a secondary task.
-- **6-DOF Balanced Units DLS IK**: Dimensionally scaled Jacobian with adaptive Levenberg-Marquardt singularity damping.
-- **Independent Pick/Place Solver Modes with Fallback**: If an object orientation cannot be satisfied by any robot, automatically falls back to Stage 1.5 position IK independently for Pick or Place.
+- **5-DOF Task-Priority Nullspace IK**: Cartesian position is solved as the primary task; finger-axis yaw alignment is projected into the nullspace.
 - **Synchronized 9-Step Trajectory State Machine**: Synchronized approach, parallel pre-handover stationing, simultaneous advance, gripper transfer, simultaneous retraction, and return to home.
+
+### Stage 3: Automated Kinematic Handover Discovery
+- **Workspace Voxel Overlap**: Samples reach volumes into 25 mm voxel grids to discover candidate handover points in 3D space.
+- **Coupled $\text{SO}(3)$ Orientation Optimization**: Solves for opposing gripper orientations with anti-parallel approach vectors ($\mathbf{z}_A \cdot \mathbf{z}_B = -1$) and orthogonal finger pads ($\mathbf{x}_A \cdot \mathbf{x}_B = 0$).
+- **Multi-Pair Support**: Evaluates and caches all available robot pairs (`robot1_robot2`, `robot2_robot3`, `robot3_robot1`).
 
 ---
 
-## 4. Configuration System
+## 4. Stage 3 Test: Final Operational Version
+
+**Stage 3 Test (`stage3_test_gui`)** represents the final, production-ready operational standard of the system, synthesizing Stage 2.5's robust trajectory execution with Stage 3's automated kinematic handover intelligence.
+
+### Key Capabilities & Enhancements:
+
+1. **Candidate Selection Strategy Selector**:
+   - **`TOP_OF_WORKSPACE` (High Z)**: Prioritizes handover candidates located in the upper volume of the workspace intersection ($Z \approx 362\text{ mm}$), maximizing ground clearance and avoiding arm collisions.
+   - **`CENTER_OF_WORKSPACE` (Centroid)**: Prioritizes candidates near the geometric centroid of the shared reach volume with balanced distance from each base.
+
+2. **Approach Strategy Telemetry**:
+   - **`DUAL_SYNCHRONIZED`**: Both robots advance simultaneously along their continuous Cartesian TCP $Z$ corridors into the handover pose.
+   - **`ASYMMETRIC`**: Handles asymmetric kinematics (such as 5-DOF manipulators) by stationing one robot safely at handover/pre-handover first while the other follows along the corridor.
+
+3. **Stage 2.5-Derived Trajectory Engine**:
+   - Uses `plan_stage1_5_synchronized_paths` for smooth, continuous joint interpolation.
+   - **Proper TCP Tooltip Exclusion (`exclude_tcp=True`)**: Handover maneuvers exclude only the fingertip contact geometry, allowing opposing grippers to meet at 0–10 mm separation without triggering false-positive whole-body collision blocks.
+   - Non-blocking execution safety monitoring: clearance gauge updates in real time (`safe` $\ge 50\text{ mm}$, `warn` $< 50\text{ mm}$) without halting simulation.
+
+4. **Multi-Robot Handover Inspector**:
+   - Live modal tool to inspect any robot pair (`robot1_robot2`, `robot2_robot3`, `robot3_robot1`).
+   - Displays position error, angle alignment dev, whole-body clearances, and approach mode.
+   - Buttons for immediate 3D visualization and simulation: `▶ Move to Pre-H (Sim)` and `▶ Move to HO (Sim)`.
+
+5. **Two-Tier Instant Disk Caching with Active Chooser**:
+   - **Tier 1 (Target IK Cache)**: Stores solved target kinematics in `trajectory_cache.json`. Subsequent planning requests load in **< 1 ms** (`⚡ [DISK CACHE HIT]`).
+   - **Tier 2 (Test Handover Cache)**: Stores solved test handover poses in `auto_handover_poses_test.json`, fingerprinted with active robot configurations.
+   - **Interactive Robot Selection**: Unlike rigid session caching, the robot selection modal (`_chooser`) is queried on every **Simulate** and **Execute** click when multiple robots can reach a target, giving full operator control to switch robots on demand.
+
+---
+
+## 5. Configuration System
 
 All kinematics models, hardware parameters, tolerances, and timings are decoupled into YAML configuration files in [`src/robot_control/config/`](file:///home/iit/rt_test/src/robot_control/config/):
 
@@ -152,7 +188,7 @@ Each robot YAML file defines:
 
 ### Workcell Coordination: `handover.yaml`
 
-Defines inter-robot coordination, workcell placement, and Stage 2.5 solver hyperparameters:
+Defines inter-robot coordination, workcell placement, and Stage 2.5/Stage 3 solver hyperparameters:
 
 ```yaml
 robots:
@@ -189,9 +225,13 @@ object_pick_ik:
     finger_alignment: 0.10
 ```
 
+### Auto-Handover Poses Cache: `auto_handover_poses_test.json`
+
+Stores pre-solved, collision-checked handover configurations for all robot pairs (`robot1_robot2`, `robot2_robot3`, `robot3_robot1`), including world coordinates, joint angles, standoff distances, and approach modes.
+
 ---
 
-## 5. Installation & Build Instructions
+## 6. Installation & Build Instructions
 
 ### Prerequisites
 
@@ -216,46 +256,58 @@ source install/setup.bash
 
 ---
 
-## 6. How to Run & GUI Operation Guide
+## 7. How to Run & GUI Operation Guide
 
 ### Launching GUIs
 
-Each stage has an independent graphical user interface:
-
 ```bash
-# Stage 1: Basic Pick-and-Place GUI
-ros2 run robot_control stage1_gui
+# =========================================================================
+# STAGE 3 TEST: Final Working Operational Station (Recommended)
+# =========================================================================
+ros2 run robot_control stage3_test_gui
 
-# Stage 1.5: Whole-Body Clearance Monitoring GUI
-ros2 run robot_control stage1_5_gui
-
-# Stage 2: 6D Pose IK GUI
-ros2 run robot_control stage2_gui
-
-# Stage 2.5: Object-Pose IK & Synchronized Handover GUI (Recommended)
-ros2 run robot_control stage2_5_gui
+# Previous Reference Implementations
+ros2 run robot_control stage2_5_gui     # Stage 2.5: Object-Pose IK & Synchronized Handover
+ros2 run robot_control stage3_gui       # Stage 3: Base Kinematic Discovery
+ros2 run robot_control stage2_gui       # Stage 2: 6D Pose IK
+ros2 run robot_control stage1_5_gui     # Stage 1.5: Whole-Body Clearance
+ros2 run robot_control stage1_gui       # Stage 1: Basic Pick-and-Place
 ```
 
-### Stage 2.5 User Walkthrough
+### Stage 3 Test Operational Walkthrough
 
-1. **Enter Pick Target**:
-   - `XYZ (mm)`: Enter world coordinates comma-separated (e.g. `-97.10, 0.0, 13.82`).
-   - `Yaw (°)`: Enter object orientation on the table (e.g. `0.0`).
-2. **Enter Place Target**:
-   - `XYZ (mm)`: Enter target placement coordinates (e.g. `0.0, 150.0, 150.0`).
-   - `Yaw (°)`: Enter desired placement yaw (e.g. `0.0`).
-3. **Click `SIMULATE (3D PREVIEW ONLY)`**:
-   - The visualizer displays candidate robot postures, workspace clouds, and collision clearance lines.
-   - If multiple robots can reach a target, an interactive selection popup asks you to select your preferred robot.
-   - Solvers automatically display badges: `[Object-Pose IK]` or `[Normal IK Fallback]`.
-   - The verified trajectory is saved to the plan cache.
-4. **Click `EXECUTE (REAL ROBOT)`**:
-   - The system detects the cached simulation and reuses it immediately, bypassing re-computation.
-   - A confirmation dialog ensures physical workspace clearance before sending trajectory commands to the robots.
+1. **Select Handover Candidate Strategy**:
+   - In the Handover Status Card, choose:
+     - `Top (High Z)` (Recommended): Handover in upper shared reach space ($Z \approx 362\text{ mm}$), maximizing clearance from the table and arm bases.
+     - `Center (Centroid)`: Handover centered between the robot bases.
+
+2. **Inspect Handover Pairs**:
+   - Click `🔍 Inspect Handover Pairs...` to open the Multi-Robot Handover Inspector.
+   - Select any pair (`robot1_robot2`, `robot2_robot3`, `robot3_robot1`).
+   - Click `▶ Move to Pre-H (Sim)` to preview the pre-handover corridor stance.
+   - Click `▶ Move to HO (Sim)` to preview the final handover grip.
+   - Motions interpolate smoothly with whole-body clearance telemetry (`exclude_tcp=True`).
+
+3. **Define Pick & Place Tasks**:
+   - `Pick Target`: Enter coordinates `XYZ (mm)` (e.g. `0.0, 150.0, 100.0`) and `Yaw (°)` (e.g. `0.0`).
+   - `Place Target`: Enter coordinates `XYZ (mm)` (e.g. `150.0, 0.0, 100.0`) and `Yaw (°)` (e.g. `0.0`).
+
+4. **Click `SIMULATE (3D PREVIEW ONLY)`**:
+   - Target IK loads instantly from disk cache (< 1 ms).
+   - If multiple robots can reach the pick/place locations, the **Robot Selection Dialog** prompts you to choose which robot performs Pick or Place.
+   - You can click **Simulate** again at any time to test different robot assignments.
+   - 3D visualizer animates the complete synchronized 9-phase trajectory.
+   - Clearance gauge tracks whole-body physical distance in real time.
+
+5. **Click `EXECUTE (REAL ROBOT)`**:
+   - Verifies live hardware feedback.
+   - Allows confirmation of chosen robot assignments.
+   - Displays final Solution Dialog with verified clearance.
+   - Streams trajectory waypoints to hardware controllers on physical robots.
 
 ---
 
-## 7. ROS 2 Interface & Topics
+## 8. ROS 2 Interface & Topics
 
 ### Published Topics
 
@@ -270,16 +322,25 @@ ros2 run robot_control stage2_5_gui
 
 ---
 
-## 8. Automated Test Suite
+## 9. Automated Test Suite
 
 A comprehensive test suite verifies forward kinematics, all IK solvers, collision avoidance, and trajectory synchronization:
 
 ```bash
-# Run all unit tests
-PYTHONPATH=src/robot_control python3 -m pytest \
-    src/robot_control/test/test_object_pick_ik.py \
-    src/robot_control/test/test_stage2_5.py \
-    src/robot_control/test/test_stage1_ik.py -v
+# Source ROS environment
+source install/setup.bash
+
+# Run Stage 3 Test Suite
+colcon test --packages-select robot_control --pytest-args "-k test_stage3_test_env"
+
+# Run Stage 3 GUI & Execution Suite
+colcon test --packages-select robot_control --pytest-args "-k test_stage3_gui"
+
+# Run Core Kinematics & Stage 2.5 Tests
+colcon test --packages-select robot_control --pytest-args "-k test_stage2_5"
+
+# View summary of all test results
+colcon test-result --all
 ```
 
-All 24 test suites execute deterministically and assert convergence, joint limit compliance, collision clearance, and fallback mechanisms.
+All core test suites execute deterministically to assert convergence, joint limit compliance, collision clearance, and fallback mechanisms.

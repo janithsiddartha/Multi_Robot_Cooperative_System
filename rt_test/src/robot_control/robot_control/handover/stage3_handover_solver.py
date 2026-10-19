@@ -197,7 +197,7 @@ def load_auto_handover_cache(cache_path: str, config_hash: str) -> Optional[Dict
         res = {}
         for pair_name, pd in pairs_data.items():
             res[pair_name] = deserialize_auto_handover(pd)
-        return res if len(res) >= 3 else None
+        return res if len(res) >= 1 else None
     except Exception:
         return None
 

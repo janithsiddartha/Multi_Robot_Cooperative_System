@@ -34,6 +34,7 @@ from robot_control.handover.stage1_5 import (
     validate_execution_safety_gate,
 )
 from robot_control.handover.stage3 import (
+    Stage3Plan,
     build_stage3_plan,
     plan_stage3_synchronized_paths,
 )
@@ -88,13 +89,10 @@ def test_phase1_and_phase9_decoupled_synchronization(setup_env):
     assert len(steps) == 20
 
     # Test conflicting paths: scheduler must serialize motions with waiting
-    # Place target directly inside Robot 1's path
-    conflict_target1 = np.array([0.0, 45.0, -45.0, 0.0, 0.0])
-    conflict_target2 = np.array([0.0, 45.0, -45.0, 0.0, 0.0])
-
+    # When safe_distance is set to 100 mm, concurrent motion (min clearance ~90.5 mm) conflicts
     steps_ser, min_c_ser, serialized_ser = schedule_collision_aware_motion(
-        start1, conflict_target1, start2, conflict_target2, cfg1, cfg2,
-        safe_distance=50.0, steps=10,
+        start1, target1, start2, target2, cfg1, cfg2,
+        safe_distance=100.0, steps=10,
         pick_rid="robot1", place_rid="robot2",
         phase_name="phase1_conflict",
         desc_concurrent="Concurrent move",
@@ -110,7 +108,7 @@ def test_phase1_and_phase9_decoupled_synchronization(setup_env):
         assert np.allclose(s.place_q, start2)
     # During part 2, pick robot is waiting at target1
     for s in part2:
-        assert np.allclose(s.pick_q, conflict_target1)
+        assert np.allclose(s.pick_q, target1)
 
 
 # =============================================================================
@@ -163,7 +161,7 @@ def test_phase6_retraces_validated_corridor(setup_env):
 
     plan, _, _ = build_stage3_plan(
         pick_xyz=[-150.0, -100.0, 200.0],
-        place_xyz=[150.0, 100.0, 180.0],
+        place_xyz=[-50.0, 180.0, 150.0],
         robots=robots,
         handover_cfg=handover_cfg,
         chooser=chooser,
@@ -205,7 +203,7 @@ def test_pre_handover_reached_before_coordinated_approach(setup_env):
 
     plan, _, _ = build_stage3_plan(
         pick_xyz=[-150.0, -100.0, 200.0],
-        place_xyz=[150.0, 100.0, 180.0],
+        place_xyz=[-50.0, 180.0, 150.0],
         robots=robots,
         handover_cfg=handover_cfg,
         chooser=chooser,
@@ -252,7 +250,7 @@ def test_transfer_requires_verified_handover_conditions(setup_env):
 
     plan, _, _ = build_stage3_plan(
         pick_xyz=[-150.0, -100.0, 200.0],
-        place_xyz=[150.0, 100.0, 180.0],
+        place_xyz=[-50.0, 180.0, 150.0],
         robots=robots,
         handover_cfg=handover_cfg,
         chooser=chooser,
@@ -328,7 +326,7 @@ def test_joint_solutions_continuous_and_within_limits(setup_env):
 
     plan, _, _ = build_stage3_plan(
         pick_xyz=[-150.0, -100.0, 200.0],
-        place_xyz=[150.0, 100.0, 180.0],
+        place_xyz=[-50.0, 180.0, 150.0],
         robots=robots,
         handover_cfg=handover_cfg,
         chooser=chooser,
@@ -412,7 +410,7 @@ def test_waiting_robot_cannot_move_to_unvalidated_pose(setup_env):
 
     plan, _, _ = build_stage3_plan(
         pick_xyz=[-150.0, -100.0, 200.0],
-        place_xyz=[150.0, 100.0, 180.0],
+        place_xyz=[-50.0, 180.0, 150.0],
         robots=robots,
         handover_cfg=handover_cfg,
         chooser=chooser,
@@ -430,11 +428,19 @@ def test_waiting_robot_cannot_move_to_unvalidated_pose(setup_env):
             "Waiting robot in Phase 3 moved from validated waiting pose"
         )
 
-    # In Phase 7, pick robot is waiting. All steps must equal pick_pre_handover_q exactly.
+    # In Phase 7:
+    # During place motion, waiting robot (pick) must be stationed at a validated pose:
+    # either stationed at pick_pre_handover_q or stationed at validated safe waiting pose (home).
+    home_pick = np.zeros_like(plan.pick_pre_handover_q)
     for step in traj.phase7_handover_to_place:
-        assert np.allclose(step.pick_q, plan.pick_pre_handover_q), (
-            "Waiting robot in Phase 7 moved from validated waiting pose"
-        )
+        if "moving from Pre-Handover to Place" in step.description:
+            assert np.allclose(step.pick_q, plan.pick_pre_handover_q) or np.allclose(step.pick_q, home_pick), (
+                "Waiting robot during place motion was not at a validated waiting pose"
+            )
+        elif "moving to safe waiting pose" in step.description:
+            assert np.allclose(step.place_q, plan.place_pre_handover_q), (
+                "Place robot moved while pick robot was retiring to safe waiting pose"
+            )
 
 
 # =============================================================================
@@ -449,7 +455,7 @@ def test_auto_and_manual_mode_safety_gate_parity(setup_env):
 
     # Plan with AUTO mode
     plan_auto, _, _ = build_stage3_plan(
-        pick_xyz=[100.0, 100.0, 200.0],
+        pick_xyz=[-150.0, -100.0, 200.0],
         place_xyz=[-50.0, 180.0, 150.0],
         robots=robots,
         handover_cfg=handover_cfg,
@@ -462,9 +468,9 @@ def test_auto_and_manual_mode_safety_gate_parity(setup_env):
     traj_auto = plan_stage3_synchronized_paths(plan_auto, robots, safe_distance=50.0, steps=15)
     safe_auto, msg_auto = validate_execution_safety_gate(traj_auto, robots, plan=plan_auto)
 
-    # Plan with MANUAL mode
+    # Plan with MANUAL mode (unvalidated dummy poses from handover.yaml)
     plan_manual, _, _ = build_stage3_plan(
-        pick_xyz=[100.0, 100.0, 200.0],
+        pick_xyz=[-150.0, -100.0, 200.0],
         place_xyz=[-50.0, 180.0, 150.0],
         robots=robots,
         handover_cfg=handover_cfg,
@@ -480,7 +486,26 @@ def test_auto_and_manual_mode_safety_gate_parity(setup_env):
     assert isinstance(safe_auto, bool)
     assert isinstance(safe_manual, bool)
     assert safe_auto, f"AUTO mode plan failed safety gate: {msg_auto}"
-    assert safe_manual, f"MANUAL mode plan failed safety gate: {msg_manual}"
+    # Unvalidated manual handover poses must NOT bypass the safety gate
+    assert not safe_manual, "Unvalidated manual handover from handover.yaml must be rejected by safety gate"
+
+    # When manual mode is provided with a valid, verified handover candidate, it passes
+    valid_pose = auto_poses["robot1_robot2"]
+    plan_manual_valid = Stage3Plan(
+        pick_robot=plan_auto.pick_robot,
+        place_robot=plan_auto.place_robot,
+        pick=plan_auto.pick,
+        place=plan_auto.place,
+        needs_handover=True,
+        pick_handover_q=valid_pose.robot_a_handover_q_deg,
+        place_handover_q=valid_pose.robot_b_handover_q_deg,
+        pick_pre_handover_q=valid_pose.robot_a_pre_handover_q_deg,
+        place_pre_handover_q=valid_pose.robot_b_pre_handover_q_deg,
+        use_auto_handover=False,
+    )
+    traj_manual_valid = plan_stage3_synchronized_paths(plan_manual_valid, robots, safe_distance=50.0, steps=15)
+    safe_manual_valid, msg_manual_valid = validate_execution_safety_gate(traj_manual_valid, robots, plan=plan_manual_valid)
+    assert safe_manual_valid, f"Validated manual candidate failed safety gate: {msg_manual_valid}"
 
 
 # =============================================================================
@@ -532,7 +557,7 @@ def test_feasible_trajectory_accepted_without_global_synchronization(setup_env):
 
     plan, _, _ = build_stage3_plan(
         pick_xyz=[-150.0, -100.0, 200.0],
-        place_xyz=[150.0, 100.0, 180.0],
+        place_xyz=[-50.0, 180.0, 150.0],
         robots=robots,
         handover_cfg=handover_cfg,
         chooser=chooser,

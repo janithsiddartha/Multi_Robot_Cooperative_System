@@ -101,7 +101,7 @@ class Stage3Plan:
             error_mm=self.place.error_mm,
             solution_count=self.place.solution_count,
         )
-        return Stage1Plan(
+        stage1_plan = Stage1Plan(
             pick_robot=self.pick_robot,
             place_robot=self.place_robot,
             pick=pick_ik,
@@ -112,6 +112,8 @@ class Stage3Plan:
             pick_pre_handover_q=self.pick_pre_handover_q,
             place_pre_handover_q=self.place_pre_handover_q,
         )
+        stage1_plan.use_auto_handover = self.use_auto_handover
+        return stage1_plan
 
     def to_stage2_5_plan(self) -> Stage2_5Plan:
         """Convert to Stage2_5Plan."""

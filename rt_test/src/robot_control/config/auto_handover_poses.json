@@ -2,101 +2,53 @@
   "version": "2.0",
   "fingerprints": {
     "5ce8858bf181f4c6": {
-      "timestamp": "2026-10-18T19:44:24",
+      "timestamp": "2026-10-19T15:13:08",
       "pairs": {
         "robot1_robot2": {
           "pair_name": "robot1_robot2",
           "handover_position_world": [
             -12.5,
-            87.5,
-            212.5
+            137.5,
+            137.5
           ],
-          "standoff_distance_mm": 50.0,
+          "standoff_distance_mm": 40.0,
           "robot_a_id": "robot1",
           "robot_b_id": "robot2",
           "robot_a_handover_q_deg": [
-            20.22,
-            30.97,
-            -87.61,
-            50.19,
-            -16.46
+            30.07,
+            15.35,
+            -87.87,
+            50.59,
+            11.56
           ],
           "robot_b_handover_q_deg": [
-            135.0,
-            87.96,
-            -20.9,
-            -79.71,
-            75.37
+            131.78,
+            86.64,
+            27.72,
+            -54.65,
+            79.11
           ],
           "robot_a_pre_handover_q_deg": [
-            20.22,
-            46.16,
-            -87.34,
-            65.23,
-            -15.91
+            30.07,
+            25.64,
+            -85.04,
+            64.74,
+            11.56
           ],
           "robot_b_pre_handover_q_deg": [
-            122.68,
-            90.0,
-            -19.23,
-            -74.4,
+            120.45,
+            84.22,
+            33.08,
+            -69.78,
             90.0
           ],
-          "handover_clearance_mm": 238.1,
-          "pre_handover_clearance_mm": 99.85,
-          "error_a_mm": 0.0,
-          "error_b_mm": 0.0,
-          "dot_z": -0.9683,
-          "dot_x": 0.0017,
-          "approach_angle_dev_deg": 14.48
-        },
-        "robot2_robot3": {
-          "pair_name": "robot2_robot3",
-          "handover_position_world": [
-            187.5,
-            212.5,
-            212.5
-          ],
-          "standoff_distance_mm": 70.0,
-          "robot_a_id": "robot2",
-          "robot_b_id": "robot3",
-          "robot_a_handover_q_deg": [
-            128.61,
-            8.12,
-            74.79,
-            -51.58,
-            -55.35
-          ],
-          "robot_b_handover_q_deg": [
-            80.21,
-            85.21,
-            14.35,
-            80.45,
-            -76.53,
-            -13.33
-          ],
-          "robot_a_pre_handover_q_deg": [
-            -50.81,
-            33.85,
-            -89.78,
-            -20.0,
-            64.95
-          ],
-          "robot_b_pre_handover_q_deg": [
-            -84.07,
-            -50.49,
-            18.55,
-            -87.6,
-            -70.12,
-            77.47
-          ],
-          "handover_clearance_mm": 192.25,
-          "pre_handover_clearance_mm": 126.58,
+          "handover_clearance_mm": 237.98,
+          "pre_handover_clearance_mm": 79.32,
           "error_a_mm": 0.006,
-          "error_b_mm": 0.004,
-          "dot_z": -0.9687,
-          "dot_x": 0.0699,
-          "approach_angle_dev_deg": 14.36
+          "error_b_mm": 0.009,
+          "dot_z": -0.9662,
+          "dot_x": 0.2527,
+          "approach_angle_dev_deg": 14.95
         },
         "robot3_robot1": {
           "pair_name": "robot3_robot1",
@@ -109,42 +61,90 @@
           "robot_a_id": "robot3",
           "robot_b_id": "robot1",
           "robot_a_handover_q_deg": [
-            -9.15,
-            77.8,
-            89.97,
-            32.56,
-            -77.09,
-            7.67
+            -8.96,
+            79.41,
+            86.93,
+            32.84,
+            -77.89,
+            23.53
           ],
           "robot_b_handover_q_deg": [
             10.01,
-            17.42,
-            -79.94,
-            80.56,
-            -1.44
+            22.69,
+            -86.39,
+            76.42,
+            15.7
           ],
           "robot_a_pre_handover_q_deg": [
-            -2.76,
-            88.31,
-            89.86,
-            31.28,
-            -74.44,
-            7.37
+            -2.69,
+            90.0,
+            86.19,
+            32.49,
+            -74.6,
+            23.53
           ],
           "robot_b_pre_handover_q_deg": [
             10.01,
-            42.09,
-            -89.5,
-            82.52,
-            54.91
+            35.51,
+            -82.04,
+            87.82,
+            15.7
           ],
-          "handover_clearance_mm": 148.61,
-          "pre_handover_clearance_mm": 99.65,
+          "handover_clearance_mm": 151.24,
+          "pre_handover_clearance_mm": 99.35,
           "error_a_mm": 0.001,
           "error_b_mm": 0.0,
-          "dot_z": -0.9861,
-          "dot_x": 0.0013,
-          "approach_angle_dev_deg": 9.56
+          "dot_z": -0.9742,
+          "dot_x": 0.0065,
+          "approach_angle_dev_deg": 13.05
+        },
+        "robot2_robot3": {
+          "pair_name": "robot2_robot3",
+          "handover_position_world": [
+            87.5,
+            137.5,
+            262.5
+          ],
+          "standoff_distance_mm": 50.0,
+          "robot_a_id": "robot2",
+          "robot_b_id": "robot3",
+          "robot_a_handover_q_deg": [
+            102.81,
+            89.66,
+            -65.71,
+            -90.0,
+            79.86
+          ],
+          "robot_b_handover_q_deg": [
+            -68.45,
+            69.03,
+            -90.0,
+            57.98,
+            3.9,
+            10.0
+          ],
+          "robot_a_pre_handover_q_deg": [
+            84.05,
+            88.71,
+            -68.57,
+            -80.27,
+            90.0
+          ],
+          "robot_b_pre_handover_q_deg": [
+            -75.39,
+            77.25,
+            -84.32,
+            57.6,
+            2.35,
+            10.0
+          ],
+          "handover_clearance_mm": 238.41,
+          "pre_handover_clearance_mm": 99.33,
+          "error_a_mm": 0.0,
+          "error_b_mm": 0.0,
+          "dot_z": -0.9734,
+          "dot_x": 0.0117,
+          "approach_angle_dev_deg": 13.24
         }
       }
     }

@@ -37,6 +37,14 @@ This document provides a comprehensive technical breakdown of every algorithm, k
    - [Independent Pick/Place Solver Fallback Logic](#57-independent-pickplace-solver-fallback-logic)
    - [Synchronized 9-Step Trajectory State Machine](#58-synchronized-9-step-trajectory-state-machine)
    - [Zero-Recalculation Simulation Plan Caching](#59-zero-recalculation-simulation-plan-caching)
+6. [Stage 3 & Stage 3 Test: Automated Kinematic Handover & Experimental Multi-Robot Coordination](#6-stage-3--stage-3-test-automated-kinematic-handover--experimental-multi-robot-coordination)
+   - [6.1 Handover Candidate Workspace Discovery via 3D Voxelization](#61-handover-candidate-workspace-discovery-via-3d-voxelization)
+   - [6.2 Candidate Selection Strategies: TOP_OF_WORKSPACE vs CENTER_OF_WORKSPACE](#62-candidate-selection-strategies-top_of_workspace-vs-center_of_workspace)
+   - [6.3 Coupled SO(3) Orientation Mating Formulation](#63-coupled-so3-orientation-mating-formulation)
+   - [6.4 Cartesian TCP Approach Corridors & Standoff Vector](#64-cartesian-tcp-approach-corridors--standoff-vector)
+   - [6.5 Dual-Synchronized vs Asymmetric Corridor Scheduling](#65-dual-synchronized-vs-asymmetric-corridor-scheduling)
+   - [6.6 Tooltip Exclusion in Whole-Body Clearance Evaluation](#66-tooltip-exclusion-in-whole-body-clearance-evaluation)
+   - [6.7 Two-Tier Disk Caching & Interactive Robot Chooser Architecture](#67-two-tier-disk-caching--interactive-robot-chooser-architecture)
 
 ---
 
@@ -607,3 +615,159 @@ Computing full 6D collision avoidance, multi-tilt object IK, and trajectory disc
    The system queries $\mathcal{K}_{\text{current}} == \mathcal{K}_{\text{cached}}$:
    - If match: **Bypasses all IK and collision checking**, directly reuses the pre-verified trajectory, and executes immediately.
    - If mismatch: Generates a new plan automatically.
+
+---
+
+## 6. Stage 3 & Stage 3 Test: Automated Kinematic Handover & Experimental Multi-Robot Coordination
+
+Stage 3 eliminates hardcoded manual handover configurations (`handover.yaml`) by algorithmically discovering, ranking, and executing physically valid 3D handover mating poses across any robot pair ($R_A, R_B$). **Stage 3 Test** establishes the operational standard by coupling automated kinematic discovery with Stage 2.5's synchronized trajectory execution engine.
+
+---
+
+### 6.1 Handover Candidate Workspace Discovery via 3D Voxelization
+
+To find candidate handover positions in 3D world space $\mathbf{p}_H \in \mathbb{R}^3$, the reachable Cartesian reach envelope of each robot arm is discretized:
+
+1. **Voxel Grid Discretization**:
+   The shared environment is partitioned into uniform cubes of resolution $\delta = 25\text{ mm}$:
+   $$\mathbf{v} = \left(\left\lfloor \frac{X}{\delta} \right\rfloor,\, \left\lfloor \frac{Y}{\delta} \right\rfloor,\, \left\lfloor \frac{Z}{\delta} \right\rfloor\right) \in \mathbb{Z}^3$$
+
+2. **Reachability Set Intersection**:
+   Let $\mathcal{V}_A \subset \mathbb{Z}^3$ and $\mathcal{V}_B \subset \mathbb{Z}^3$ be the sets of occupied voxels reachable by Robot $A$ and Robot $B$ subject to joint limits $\mathbf{q} \in [\mathbf{q}_{\min}, \mathbf{q}_{\max}]$. The candidate handover spatial domain is the boolean intersection:
+   $$\mathcal{V}_{AB} = \mathcal{V}_A \cap \mathcal{V}_B$$
+
+3. **Geometric Safety Bounds Filter**:
+   Candidates are filtered to permissible workcell heights:
+   $$\mathcal{C}_{\text{cand}} = \left\{ \mathbf{p}_v = \delta \cdot \mathbf{v} + \frac{\delta}{2} \;\middle|\; \mathbf{v} \in \mathcal{V}_{AB}, \; 80\text{ mm} \le Z_v \le 400\text{ mm} \right\}$$
+
+---
+
+### 6.2 Candidate Selection Strategies: `TOP_OF_WORKSPACE` vs `CENTER_OF_WORKSPACE`
+
+For each candidate point $\mathbf{p}_H \in \mathcal{C}_{\text{cand}}$, distances to robot base mounts are defined:
+$$d_A = \|\mathbf{p}_H - \mathbf{p}_{\text{base}, A}\|, \quad d_B = \|\mathbf{p}_H - \mathbf{p}_{\text{base}, B}\|, \quad d_{\text{mid}} = \left\|\mathbf{p}_H - \frac{\mathbf{p}_{\text{base}, A} + \mathbf{p}_{\text{base}, B}}{2}\right\|$$
+
+Stage 3 Test provides two selectable candidate ranking strategies:
+
+#### Strategy 1: `TOP_OF_WORKSPACE` (Production Recommended)
+Prioritizes elevated handover points ($Z \approx 362\text{ mm}$) to maximize clearance from the table surface and avoid elbow-to-body collisions:
+$$\text{Score}_{\text{top}}(\mathbf{p}_H) = Z(\mathbf{p}_H) - 0.50 \cdot |d_A - d_B| - 0.30 \cdot d_{\text{mid}}$$
+Candidates with the highest scores are evaluated first.
+
+#### Strategy 2: `CENTER_OF_WORKSPACE` (Geometric Centroid)
+Prioritizes candidates centered between both bases to equalize arm extension and avoid joint limits:
+$$\text{Cost}_{\text{center}}(\mathbf{p}_H) = \max(d_A, d_B) + 0.50 \cdot |d_A - d_B| + 0.40 \cdot d_{\text{mid}}$$
+Candidates with the lowest costs are evaluated first.
+
+---
+
+### 6.3 Coupled $\text{SO}(3)$ Orientation Mating Formulation
+
+At candidate position $\mathbf{p}_H$, joint configurations $\mathbf{q}_A \in \mathbb{R}^{n_A}$ and $\mathbf{q}_B \in \mathbb{R}^{n_B}$ must simultaneously satisfy spatial position matching, anti-parallel approach alignment, finger orthogonality, and whole-body clearance.
+
+#### Constraints:
+1. **Position Coincidence**:
+   $$\|\mathbf{p}_{\text{tcp}, A}(\mathbf{q}_A) - \mathbf{p}_H\| \le \epsilon_p, \quad \|\mathbf{p}_{\text{tcp}, B}(\mathbf{q}_B) - \mathbf{p}_H\| \le \epsilon_p \quad (\epsilon_p = 1.0\text{ mm})$$
+2. **Opposing Approach Axis (Anti-Parallelism)**:
+   The end-effector $Z$ axes must point directly toward each other:
+   $$\mathbf{z}_A(\mathbf{q}_A) \cdot \mathbf{z}_B(\mathbf{q}_B) \le -1 + \epsilon_z \quad (\epsilon_z = 1 - \cos(15^\circ))$$
+3. **Orthogonal Finger Mating**:
+   The gripper finger pad axes (local $X$) must be orthogonal to allow intermeshed grasping without finger collision:
+   $$|\mathbf{x}_A(\mathbf{q}_A) \cdot \mathbf{x}_B(\mathbf{q}_B)| \le \epsilon_x \quad (\epsilon_x = \sin(15^\circ))$$
+4. **Body Clearance**:
+   $$c_{\text{body}}(\mathbf{q}_A, \mathbf{q}_B) \ge d_{\text{safe}} \quad (d_{\text{safe}} = 45.0\text{ mm})$$
+
+#### Optimization Loss Function:
+$$\mathcal{L}(\mathbf{q}_A, \mathbf{q}_B) = \|\mathbf{p}_A - \mathbf{p}_H\|^2 + \|\mathbf{p}_B - \mathbf{p}_H\|^2 + w_z \left(\mathbf{z}_A \cdot \mathbf{z}_B + 1\right)^2 + w_x \left(\mathbf{x}_A \cdot \mathbf{x}_B\right)^2 + w_{\text{reg}} \left(\|\mathbf{q}_A - \mathbf{q}_{A, \text{seed}}\|^2 + \|\mathbf{q}_B - \mathbf{q}_{B, \text{seed}}\|^2\right)$$
+where $w_z = 10.0$, $w_x = 5.0$, and $w_{\text{reg}} = 0.01$.
+
+---
+
+### 6.4 Cartesian TCP Approach Corridors & Standoff Vector
+
+To ensure collision-free mating, robots do not move directly from arbitrary configurations into the handover point. Instead, both robots back away along their end-effector approach vectors $\mathbf{z}$ by standoff distance $d_{\text{standoff}} \in [50.0, 100.0]\text{ mm}$ to establish **Pre-Handover Stances**:
+
+$$\mathbf{p}_{\text{pre}, A} = \mathbf{p}_H - d_{\text{standoff}} \cdot \mathbf{z}_A$$
+$$\mathbf{p}_{\text{pre}, B} = \mathbf{p}_H - d_{\text{standoff}} \cdot \mathbf{z}_B$$
+
+The linear Cartesian approach corridor path is parameterized by $s \in [0, 1]$:
+$$\mathbf{p}_i(s) = \mathbf{p}_{\text{pre}, i} + s \cdot d_{\text{standoff}} \cdot \mathbf{z}_i, \quad R_i(s) = R_{H, i}$$
+
+Continuous joint trajectory waypoints $\mathbf{q}(s)$ along this corridor are solved backward from $\mathbf{q}_H$ using posture-continuity regularization:
+$$\mathbf{q}_k = \arg\min_{\mathbf{q}} \left( \|\mathbf{p}_{\text{tcp}}(\mathbf{q}) - \mathbf{p}(s_k)\|^2 + w_{\text{ori}} (1 - \mathbf{z}(\mathbf{q}) \cdot \mathbf{z}_H)^2 + 0.05 \|\mathbf{q} - \mathbf{q}_{k+1}\|^2 \right)$$
+
+---
+
+### 6.5 Dual-Synchronized vs Asymmetric Corridor Scheduling
+
+Depending on the kinematic degrees of freedom of the robot pair:
+
+1. **`DUAL_SYNCHRONIZED`**:
+   - Both robots advance simultaneously along their Cartesian corridors at identical normalized velocities:
+     $$\mathbf{q}_A(t) = \mathbf{q}_{\text{pre}, A} + \alpha(t)(\mathbf{q}_{H, A} - \mathbf{q}_{\text{pre}, A})$$
+     $$\mathbf{q}_B(t) = \mathbf{q}_{\text{pre}, B} + \alpha(t)(\mathbf{q}_{H, B} - \mathbf{q}_{\text{pre}, B})$$
+   - Applied when both arms have full 6-DOF dexterity or favorable 5-DOF alignment.
+
+2. **`ASYMMETRIC`**:
+   - For 5-DOF pairs (such as `robot1_robot2` where Robot 2 operates near roll limits), continuous corridor solving on one arm may encounter kinematic singularities.
+   - In asymmetric mode, the constrained arm stations safely at pre-handover/handover first, while the partner arm advances along its corridor, ensuring high manipulability and zero collision risk.
+
+---
+
+### 6.6 Tooltip Exclusion in Whole-Body Clearance Evaluation
+
+During Phase 4 (Advance to Handover) and Phase 6 (Retract to Pre-Handover), the opposing gripper tips approach each other down to contact distance ($\|\mathbf{p}_{\text{tcp}, A} - \mathbf{p}_{\text{tcp}, B}\| \to 0\text{ mm}$). 
+
+If gripper fingertips were included in whole-body clearance checks, normal handover execution would be falsely flagged as a catastrophic collision.
+
+#### Mathematical Formulation:
+Each arm with $N$ frames is modeled as $N-1$ line segments $S_i = [\mathbf{p}_i, \mathbf{p}_{i+1}]$:
+$$\text{Segments}(q) = \begin{cases} 
+\{[\mathbf{p}_0, \mathbf{p}_1], [\mathbf{p}_1, \mathbf{p}_2], \dots, [\mathbf{p}_{N-2}, \mathbf{p}_{N-1}]\} & \text{if } \text{exclude\_tcp} = \text{False} \\
+\{[\mathbf{p}_0, \mathbf{p}_1], [\mathbf{p}_1, \mathbf{p}_2], \dots, [\mathbf{p}_{N-3}, \mathbf{p}_{N-2}]\} & \text{if } \text{exclude\_tcp} = \text{True}
+\end{cases}$$
+
+- Setting $\text{exclude\_tcp} = \text{True}$ eliminates the tool-flange-to-fingertip segment while strictly monitoring all physical arm links (base, shoulder, upper arm, elbow, forearm, wrist).
+- Link body clearance between arms is $> 200\text{ mm}$, guaranteeing complete safety while allowing opposing fingers to close upon the object.
+- **Non-Blocking Telemetry**: The UI clearance gauge dynamically reflects distance without halting motion:
+  $$\text{Gauge Status} = \begin{cases} \text{"safe"} & \text{if } c \ge 50.0\text{ mm} \\ \text{"warn"} & \text{if } c < 50.0\text{ mm} \end{cases}$$
+
+---
+
+### 6.7 Two-Tier Disk Caching & Interactive Robot Chooser Architecture
+
+To deliver sub-millisecond execution response while preserving full operator flexibility:
+
+```
+User Click (Simulate / Execute)
+       │
+       ▼
+┌───────────────────────────────────────────────────────────┐
+│ Tier 1: Target IK Disk Cache (trajectory_cache.json)     │
+│ • Query: (p_pick, yaw_pick), (p_place, yaw_place), Hash   │
+│ • Status: Loaded in < 1 ms (⚡ DISK CACHE HIT)             │
+└─────────────────────────────┬─────────────────────────────┘
+                              │
+                              ▼
+┌───────────────────────────────────────────────────────────┐
+│ Interactive Robot Selection Dialog (_chooser)             │
+│ • Queried EVERY time when multiple robots reach targets   │
+│ • Operator selects preferred Pick & Place robots          │
+└─────────────────────────────┬─────────────────────────────┘
+                              │
+                              ▼
+┌───────────────────────────────────────────────────────────┐
+│ Tier 2: Auto-Handover Pair Cache                          │
+│ (auto_handover_poses_test.json)                           │
+│ • Instant recall of pre-solved mating poses & corridors   │
+└─────────────────────────────┬─────────────────────────────┘
+                              │
+                              ▼
+┌───────────────────────────────────────────────────────────┐
+│ Synchronized Trajectory Generation (plan_stage3_test_paths)│
+│ • Generated in ~5 ms with clearance verification          │
+│ • Modal Solution Dialog & Hardware Stream                 │
+└───────────────────────────────────────────────────────────┘
+```
+
+By decoupling target kinematics caching from the robot assignment decision, the operator can freely test different robot combinations on consecutive clicks with zero recalculation delay.
