@@ -2,53 +2,53 @@
   "version": "2.0-test",
   "fingerprints": {
     "5ce8858bf181f4c6": {
-      "timestamp": "2026-10-19T16:49:01",
+      "timestamp": "2026-10-21T16:18:35",
       "pairs": {
         "robot1_robot2": {
           "pair_name": "robot1_robot2",
           "handover_position_world": [
-            -12.5,
-            -12.5,
+            37.5,
+            -37.5,
             362.5
           ],
           "standoff_distance_mm": 50.0,
           "robot_a_id": "robot1",
           "robot_b_id": "robot2",
           "robot_a_handover_q_deg": [
-            -3.01,
-            -9.0,
-            -3.39,
-            72.39,
-            90.0
+            -7.43,
+            -33.1,
+            15.16,
+            60.88,
+            85.0
           ],
           "robot_b_handover_q_deg": [
-            3.44,
-            -28.21,
-            4.49,
-            -1.61,
-            63.23
+            20.2,
+            -13.54,
+            -3.67,
+            -17.49,
+            77.94
           ],
           "robot_a_pre_handover_q_deg": [
-            -3.01,
-            0.97,
-            -0.97,
-            87.6,
-            90.0
+            -7.43,
+            -21.69,
+            16.95,
+            82.02,
+            85.0
           ],
           "robot_b_pre_handover_q_deg": [
-            8.01,
-            -16.07,
-            3.5,
-            -8.44,
-            83.64
+            23.56,
+            -1.32,
+            -5.31,
+            -14.76,
+            90.0
           ],
-          "handover_clearance_mm": 239.15,
-          "pre_handover_clearance_mm": 99.64,
+          "handover_clearance_mm": 238.6,
+          "pre_handover_clearance_mm": 99.41,
           "error_a_mm": 0.0,
           "error_b_mm": 0.0,
-          "dot_z": -0.9858,
-          "dot_x": 0.0066,
-          "approach_angle_dev_deg": 9.67,
+          "dot_z": -0.9766,
+          "dot_x": 0.0152,
+          "approach_angle_dev_deg": 12.42,
           "approach_mode": "DUAL_SYNCHRONIZED",
           "candidate_origin": "TOP_OF_WORKSPACE",
           "corridor_a_valid": true,
@@ -57,53 +57,53 @@
         "robot2_robot3": {
           "pair_name": "robot2_robot3",
           "handover_position_world": [
-            87.5,
-            137.5,
+            112.5,
+            187.5,
             262.5
           ],
           "standoff_distance_mm": 50.0,
           "robot_a_id": "robot2",
           "robot_b_id": "robot3",
           "robot_a_handover_q_deg": [
-            102.81,
-            89.66,
-            -65.71,
-            -90.0,
-            79.86
+            -19.75,
+            -20.35,
+            -62.65,
+            89.99,
+            -89.47
           ],
           "robot_b_handover_q_deg": [
-            -68.45,
-            69.03,
-            -90.0,
-            57.98,
-            3.9,
-            10.0
+            66.48,
+            70.64,
+            -6.54,
+            87.01,
+            -81.29,
+            -30.0
           ],
           "robot_a_pre_handover_q_deg": [
-            84.05,
-            88.71,
-            -68.57,
-            -80.27,
-            90.0
+            -55.41,
+            20.8,
+            -84.85,
+            28.79,
+            48.77
           ],
           "robot_b_pre_handover_q_deg": [
-            -75.39,
-            77.25,
-            -84.32,
-            57.6,
-            2.35,
-            10.0
+            81.22,
+            79.29,
+            -9.47,
+            79.56,
+            -72.39,
+            -30.0
           ],
-          "handover_clearance_mm": 238.41,
-          "pre_handover_clearance_mm": 99.33,
-          "error_a_mm": 0.0,
-          "error_b_mm": 0.0,
-          "dot_z": -0.9734,
-          "dot_x": 0.0117,
-          "approach_angle_dev_deg": 13.24,
-          "approach_mode": "DUAL_SYNCHRONIZED",
+          "handover_clearance_mm": 156.44,
+          "pre_handover_clearance_mm": 99.39,
+          "error_a_mm": 0.02,
+          "error_b_mm": 0.02,
+          "dot_z": -0.9758,
+          "dot_x": 0.0322,
+          "approach_angle_dev_deg": 12.64,
+          "approach_mode": "ASYMMETRIC_A_FIRST",
           "candidate_origin": "CENTER_OF_WORKSPACE",
-          "corridor_a_valid": true,
+          "corridor_a_valid": false,
           "corridor_b_valid": true
         },
         "robot3_robot1": {
@@ -117,46 +117,46 @@
           "robot_a_id": "robot3",
           "robot_b_id": "robot1",
           "robot_a_handover_q_deg": [
-            66.13,
-            2.73,
-            -45.63,
-            90.0,
-            -89.99,
-            81.6
+            86.17,
+            36.48,
+            -69.17,
+            8.79,
+            -50.98,
+            9.5
           ],
           "robot_b_handover_q_deg": [
             58.24,
-            12.68,
-            -83.81,
-            21.41,
-            -45.97
+            -89.65,
+            -15.33,
+            -86.95,
+            -13.8
           ],
           "robot_a_pre_handover_q_deg": [
-            36.81,
-            -2.19,
-            -33.26,
-            53.24,
-            -89.72,
-            -24.28
+            80.83,
+            27.05,
+            -41.48,
+            8.63,
+            -56.25,
+            9.5
           ],
           "robot_b_pre_handover_q_deg": [
             58.24,
-            31.2,
-            -87.77,
-            41.82,
-            -45.97
+            16.12,
+            -86.27,
+            37.26,
+            30.88
           ],
-          "handover_clearance_mm": 153.55,
-          "pre_handover_clearance_mm": 99.77,
-          "error_a_mm": 0.021,
-          "error_b_mm": 0.014,
-          "dot_z": -0.9896,
-          "dot_x": 0.1664,
-          "approach_angle_dev_deg": 8.28,
-          "approach_mode": "ASYMMETRIC_A_FIRST",
+          "handover_clearance_mm": 107.26,
+          "pre_handover_clearance_mm": 99.46,
+          "error_a_mm": 0.001,
+          "error_b_mm": 0.001,
+          "dot_z": -0.9869,
+          "dot_x": 0.0014,
+          "approach_angle_dev_deg": 9.27,
+          "approach_mode": "ASYMMETRIC_B_FIRST",
           "candidate_origin": "CENTER_OF_WORKSPACE",
-          "corridor_a_valid": false,
-          "corridor_b_valid": true
+          "corridor_a_valid": true,
+          "corridor_b_valid": false
         }
       }
     }

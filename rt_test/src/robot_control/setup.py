@@ -54,6 +54,8 @@ setup(
             'stage3_gui = robot_control.gui.stage3_gui:main',
             'stage3_test = robot_control.handover.stage3_test:main',
             'stage3_test_gui = robot_control.gui.stage3_test_gui:main',
+            'stage3_test2 = robot_control.handover.stage3_test2:main',
+            'stage3_test2_gui = robot_control.gui.stage3_test2_gui:main',
         ],
     },
 )

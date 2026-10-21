@@ -151,6 +151,14 @@ class Stage1_5TrajectoryResult:
     def phase7_simultaneous_home(self) -> List[Stage1_5Step]:
         return self.phase9_simultaneous_home
 
+    @property
+    def phase7_place_and_home(self) -> List[Stage1_5Step]:
+        return self.phase7_handover_to_place
+
+    @property
+    def phase9_place_to_home(self) -> List[Stage1_5Step]:
+        return self.phase9_simultaneous_home
+
 
 def get_tcp_world_pose(
     q_deg_or_rad: np.ndarray, cfg: object, in_degrees: bool = True
