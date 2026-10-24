@@ -1,0 +1,112 @@
+workspace:
+  frame: world
+
+  # Actual robot position workspaces are computed from:
+  #   - DH parameters
+  #   - joint limits
+  #   - world base transforms
+  #
+  # No Cartesian XYZ boundary is used by
+  # PositionWorkspaceComputer.
+
+  sampling:
+    voxel_size_mm: 500.0
+    workspace_samples: 5000
+
+    # Temporarily retained for legacy planner/static-map code.
+    position_step: 100.0
+    orientation_step_deg: 45.0
+
+pose_tolerances:
+  position_mm: 1.0
+  orientation_deg: 15.0
+
+auto_orientation:
+  approach_directions:
+    - [0.0, 0.0, -1.0]
+    - [0.0, 0.0, 1.0]
+  yaw_angles_deg: [0.0, 90.0, 180.0, 270.0]
+  tilt_angles_deg: [0.0, 10.0, -10.0, 20.0, -20.0]
+
+visualization:
+  z_min: 0.0
+
+handover:
+  safe_distance: 50.0
+  max_reach: 400.0
+  singularity:
+    minimum_manipulability: 1e-4
+  max_singularity_cost: 1000.0
+
+  scoring:
+    distance: 1.0
+    joint: 0.5
+    orientation: 2.0
+    singularity: 0.1
+    trajectory_time: 1.0
+    clearance: 0.5
+  
+  trajectory:
+    samples: 100
+    max_duration: 30.0
+
+execution:
+  timings:
+    pick_grasp_wait_s: 2.0
+    handover_transfer_wait_s: 1.0
+    place_release_wait_s: 2.0
+    step_interval_s: 0.05
+    dwell_time_s: 0.5
+  trajectory:
+    steps: 30
+    stagger_delay_ratio: 0.35
+
+object_pick_ik:
+  finger_axis: "x"
+  approach_axis: "z"
+  tolerances:
+    position_mm: 1.0
+    orientation_deg: 15.0
+    finger_alignment_deg: 5.0
+    joint_margin_deg: 0.1
+    min_manipulability: 1e-4
+  solver:
+    characteristic_length_mm: 100.0
+    max_iterations: 100
+    damping_base: 0.05
+    damping_max: 0.5
+  candidate_tilts_deg: [0.0, 10.0, -10.0, 20.0, -20.0, 30.0, -30.0, 45.0, -45.0, 60.0, -60.0, 75.0, -75.0, 90.0, -90.0]
+  cost_weights:
+    tilt: 0.40
+    current_q: 0.25
+    joint_margin: 0.15
+    manipulability: 0.10
+    finger_alignment: 0.10
+
+robots:
+  robot1:
+    world_base_xyz: [-250.0, 0.0, 0.0]
+    world_base_rpy_deg: [0.0, 0.0, 0.0]
+  robot2:
+    world_base_xyz: [250.0, 0.0, 0.0]
+    world_base_rpy_deg: [0.0, 0.0, 180.0]
+  robot3:
+    world_base_xyz: [0.0, 250.0, 0.0]
+    world_base_rpy_deg: [0.0, 0.0, 90.0]
+
+manual_handover:
+  robot1_robot2:
+    robot1_pre_q: [0.0, 30.0, -60.0, -45.0, 0.0]
+    robot2_pre_q: [0.0, 30.0, -60.0, -45.0, 0.0]
+    robot1_q: [0.0, 45.0, -90.0, -45.0, 0.0]
+    robot2_q: [0.0, 45.0, -90.0, -45.0, 0.0]
+  robot2_robot3:
+    robot2_pre_q: [90.0, 30.0, -60.0, -45.0, 0.0]
+    robot3_pre_q: [-90.0, 30.0, -60.0, -45.0, 0.0, 0.0]
+    robot2_q: [90.0, 45.0, -90.0, -45.0, 0.0]
+    robot3_q: [-90.0, 45.0, -90.0, -45.0, 0.0, 0.0]
+  robot3_robot1:
+    robot3_pre_q: [90.0, 30.0, -60.0, -45.0, 0.0, 0.0]
+    robot1_pre_q: [-90.0, 30.0, -60.0, -45.0, 0.0]
+    robot3_q: [90.0, 45.0, -90.0, -45.0, 0.0, 0.0]
+    robot1_q: [-90.0, 45.0, -90.0, -45.0, 0.0]

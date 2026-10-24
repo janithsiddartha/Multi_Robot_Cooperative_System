@@ -1,0 +1,15 @@
+There are three closely related methods
+
+A. Null-space motion / self-motion
+Keep the TCP position fixed while joints move into different configurations. The TCP orientation is allowed to change.
+This is the simplest method for what you're describing.
+
+B. Fixed-position orientation control
+Keep the TCP position fixed while deliberately changing its orientation. This is a constrained inverse-kinematics problem.
+The robot must have sufficient kinematic capability to achieve the requested rotation.
+
+C. Circular Cartesian trajectory
+Move the TCP along a circular arc around a specified pivot point. The TCP position changes along the circle.
+This is different from rotating the tool while keeping its TCP position fixed.
+
+so for now we 1st taje B for x,y,z we find all the orienatations , and then 

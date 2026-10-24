@@ -1,0 +1,50 @@
+/**:
+  ros__parameters:
+    robot:
+      name: robot2
+
+    kinematics:
+      dh:
+        alpha_deg: [0.0, 0.0, 90.0, 0.0, -90.0, 90.0, 90.0, 90.0]
+        a: [0.0, 20.6, 0.0, 130.0, 0.0, 0.0, 36.7, 0.0]
+        d: [80.0, 45.0 ,0.0,0.0,90.0,0.0,0.0,130.0]
+        theta_offset_deg: [0.0, 0.0, 90.0, -90.0, -90.0 , 90.0, 90.0,180.0]
+        theta_joint_index: [0, -1, 1, 2, 3, -1, 4, -1]
+        theta_joint_multiplier: [1.0, 0.0, 1.0, 1.0, 1.0, 0.0, -1.0, 0.0]
+
+      joints:
+        home_deg: [0.0, 0.0, 0.0, 0.0, 0.0]
+        limits_deg_min: [-135.0, -90.0, -90.0, -90.0, -90.0]
+        limits_deg_max: [135.0, 90.0, 90.0, 90.0, 90.0]
+        scale: [0.75, 0.75, 0.75, 0.50, 0.50]
+        sign: [1, 1, -1, 1, -1]
+        offset: [0.0, 0.0, 0.0, 0.0, 0.0]
+        velocity_limits_deg_per_s: [120.0, 120.0, 120.0, 120.0, 120.0]
+        acceleration_limits_deg_per_s2: [600.0, 600.0, 600.0, 600.0, 600.0]
+        jerk_limits_deg_per_s3: [3000.0, 3000.0, 3000.0, 3000.0, 3000.0]
+
+      tcp:
+        offset: [0.0, 0.0, 0.0]
+
+    uart:
+      port: "/dev/ttyACM0"
+      baudrate: 115200
+
+    gripper:
+      open_angle: 55.0
+      close_angle: -55.0
+      scale: 0.5
+      sign: 1.0
+      offset: 0.0
+      finger_axis: "x"
+      approach_axis: "z"
+
+    trajectory:
+      dt: 0.02
+      approach_height: 50.0
+      segment_time: 2.0
+
+    gui:
+      title: "Robot 2 - Control Station"
+      overview: "Welcome to the Robot 2 Workstation.\n\n- FK: Control joints directly with sliders.\n- IK: Input precise Cartesian X, Y, Z targets.\n- Trajectory Analysis: Analyze and plot generated trajectories."
+      system_info: "DOF: 5\nRobot Type: Articulated Serial Manipulator\nController: ESP32\nServo Driver: PCA9685"

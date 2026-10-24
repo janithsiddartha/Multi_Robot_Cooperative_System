@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="rt_AI GPU-Accelerated 3D Web Digital Twin for Heterogeneous Multi-Robot Pick-and-Place & Synchronized Handover.">
+  <title>rt_AI — 3D Web Digital Twin & Multi-Robot Control Station</title>
+
+  <!-- Google Fonts: Outfit, Inter, JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Application Stylesheet -->
+  <link rel="stylesheet" href="/static/css/style.css">
+
+  <!-- Three.js & Controls from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+</head>
+<body>
+  <div id="app-container">
+    
+    <!-- ============================================================
+         TOP HEADER & STATUS BAR
+         ============================================================ -->
+    <header id="top-header">
+      <div class="brand-section">
+        <div class="brand-icon">
+          <i class="fa fa-robot"></i>
+        </div>
+        <h1 class="brand-title">rt_AI Web Digital Twin</h1>
+        <span class="badge-tag">Stage 3 Test 2 Production</span>
+      </div>
+
+      <div class="header-telemetry">
+        <div class="telemetry-item">
+          <span id="ws-status-dot" class="status-dot disconnected"></span>
+          <span id="ws-status-text">CONNECTING...</span>
+        </div>
+        <div class="telemetry-item">
+          <i class="fa fa-shield-halved" style="color: var(--status-safe);"></i>
+          <span>Collision Gate: <strong>45.0 mm</strong></span>
+        </div>
+        <div class="telemetry-item">
+          <i class="fa fa-bolt" style="color: var(--robot1-cyan);"></i>
+          <span>Kinematic Cache: <strong>&lt; 1 ms</strong></span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button id="btn-home" class="btn btn-glass btn-sm" title="Return all physical robots to mechanical home">
+          <i class="fa fa-house"></i> Home All
+        </button>
+      </div>
+    </header>
+
+    <!-- ============================================================
+         MAIN WORKSPACE: CONTROL SIDEBAR + 3D VIEWPORT + TELEMETRY
+         ============================================================ -->
+    <main id="main-content">
+      
+      <!-- LEFT SIDEBAR: MODE TABS & CONTROL DOCK -->
+      <aside id="control-sidebar">
+
+        <!-- Sidebar Mode Navigation Tabs -->
+        <nav class="sidebar-mode-nav">
+          <button class="mode-nav-btn active" data-tab="tab-planner">
+            <i class="fa fa-bolt"></i> Stage 3 Planner
+          </button>
+          <button class="mode-nav-btn" data-tab="tab-jogger">
+            <i class="fa fa-gamepad"></i> Manual Jogger
+          </button>
+          <button class="mode-nav-btn" data-tab="tab-inspector">
+            <i class="fa fa-handshake"></i> Handover
+          </button>
+        </nav>
+
+        <!-- ========================================================
+             PANEL 1: STAGE 3 TEST 2 AUTONOMOUS HANDOVER PLANNER
+             ======================================================== -->
+        <div id="tab-planner" class="sidebar-pane active">
+          <!-- Pick Target Coordinate Card -->
+          <section id="card-pick-target" class="glass-card card-cyan">
+            <div class="card-header">
+              <span class="card-title">
+                <i class="fa fa-crosshairs" style="color: var(--robot1-cyan);"></i> Pick Target
+              </span>
+              <span id="badge-pick-status" class="badge-tag">QUERYING...</span>
+            </div>
+
+            <div class="coord-grid">
+              <div class="input-group">
+                <label for="input-pick-x" class="input-label">X [mm]</label>
+                <input type="number" id="input-pick-x" class="input-control" value="-200.0" step="5">
+              </div>
+              <div class="input-group">
+                <label for="input-pick-y" class="input-label">Y [mm]</label>
+                <input type="number" id="input-pick-y" class="input-control" value="150.0" step="5">
+              </div>
+              <div class="input-group">
+                <label for="input-pick-z" class="input-label">Z [mm]</label>
+                <input type="number" id="input-pick-z" class="input-control" value="150.0" step="5">
+              </div>
+            </div>
+
+            <div class="input-group">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <label for="input-pick-yaw" class="input-label">Table Yaw ψ [deg]</label>
+                <input type="number" id="input-pick-yaw" class="input-control" style="width: 70px; text-align: right;" value="0">
+              </div>
+              <div class="yaw-slider-row">
+                <input type="range" id="slider-pick-yaw" class="yaw-slider" min="0" max="360" value="0">
+              </div>
+            </div>
+
+            <div class="preset-pills">
+              <button class="preset-pill" data-type="pick" data-coords="[-200.0, 150.0, 150.0]" data-yaw="0">NW Bay (R3)</button>
+              <button class="preset-pill" data-type="pick" data-coords="[-100.0, 250.0, 150.0]" data-yaw="0">North Bay (R1/R3)</button>
+              <button class="preset-pill" data-type="pick" data-coords="[0.0, 150.0, 150.0]" data-yaw="0">Center (R1/R2)</button>
+            </div>
+          </section>
+
+          <!-- Place Target Coordinate Card -->
+          <section id="card-place-target" class="glass-card card-violet">
+            <div class="card-header">
+              <span class="card-title">
+                <i class="fa fa-location-dot" style="color: var(--robot2-violet);"></i> Place Target
+              </span>
+              <span id="badge-place-status" class="badge-tag">QUERYING...</span>
+            </div>
+
+            <div class="coord-grid">
+              <div class="input-group">
+                <label for="input-place-x" class="input-label">X [mm]</label>
+                <input type="number" id="input-place-x" class="input-control" value="150.0" step="5">
+              </div>
+              <div class="input-group">
+                <label for="input-place-y" class="input-label">Y [mm]</label>
+                <input type="number" id="input-place-y" class="input-control" value="100.0" step="5">
+              </div>
+              <div class="input-group">
+                <label for="input-place-z" class="input-label">Z [mm]</label>
+                <input type="number" id="input-place-z" class="input-control" value="180.0" step="5">
+              </div>
+            </div>
+
+            <div class="input-group">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <label for="input-place-yaw" class="input-label">Table Yaw ψ [deg]</label>
+                <input type="number" id="input-place-yaw" class="input-control" style="width: 70px; text-align: right;" value="0">
+              </div>
+              <div class="yaw-slider-row">
+                <input type="range" id="slider-place-yaw" class="yaw-slider violet" min="0" max="360" value="0">
+              </div>
+            </div>
+
+            <div class="preset-pills">
+              <button class="preset-pill" data-type="place" data-coords="[150.0, 100.0, 180.0]" data-yaw="0">East Line (R1)</button>
+              <button class="preset-pill" data-type="place" data-coords="[391.45, -133.55, 150.0]" data-yaw="0">SE Table (R2)</button>
+              <button class="preset-pill" data-type="place" data-coords="[228.47, -178.7, 200.0]" data-yaw="0">East Buffer (R2)</button>
+            </div>
+          </section>
+
+          <!-- Dynamic Planning Progress Banner -->
+          <div id="plan-loading-banner" class="plan-loading-banner" style="display: none;">
+            <div class="spinner-neon"></div>
+            <div style="flex: 1;">
+              <div id="plan-loading-title" style="font-weight: 700; color: var(--robot1-cyan); font-size: 12px;">Computing Kinematics...</div>
+              <div id="plan-loading-subtitle" style="font-size: 11px; color: var(--text-muted);">Solving reachability &amp; adaptive tilts across robots...</div>
+            </div>
+          </div>
+
+          <!-- Primary Action Buttons (matching Stage 3 Test 2 GUI) -->
+          <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px;">
+            <button id="btn-simulate-task" class="btn btn-success btn-full" style="font-weight: 700; font-size: 12px; padding: 10px; letter-spacing: 0.5px;">
+              <i class="fa fa-play"></i> ▶ SIMULATE (3D PREVIEW ONLY)
+            </button>
+            <button id="btn-execute-task" class="btn btn-danger btn-full" style="font-weight: 700; font-size: 12px; padding: 10px; letter-spacing: 0.5px;">
+              <i class="fa fa-bolt"></i> ⚡ EXECUTE (REAL ROBOT)
+            </button>
+            <button id="btn-plan" class="btn btn-glass btn-full" style="font-size: 11px; padding: 6px; color: var(--text-muted);">
+              <i class="fa fa-magnifying-glass"></i> Verify Kinematics &amp; Corridors
+            </button>
+          </div>
+        </div>
+
+        <!-- ========================================================
+             PANEL 2: SINGLE ROBOT KINEMATICS & JOGGER (testGUI 1, 2, 3)
+             ======================================================== -->
+        <div id="tab-jogger" class="sidebar-pane">
+          <!-- Active Robot Selector Pills -->
+          <div class="glass-card" style="padding: 10px; margin-bottom: 8px;">
+            <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px;">Select Active Robot</div>
+            <div class="jogger-robot-pills">
+              <button class="jogger-pill active" data-robot="robot1">R1 (5-DOF, 0°)</button>
+              <button class="jogger-pill" data-robot="robot2">R2 (5-DOF, -120°)</button>
+              <button class="jogger-pill" data-robot="robot3">R3 (6-DOF, 120°)</button>
+            </div>
+          </div>
+
+          <!-- Submode Nav Pills (Joint Sliders / Direct IK / DH Parameters) -->
+          <div style="display: flex; gap: 4px; margin-bottom: 8px;">
+            <button class="jog-subtab-btn active" data-subtab="jog-sub-joints" style="flex:1;">Joint Sliders</button>
+            <button class="jog-subtab-btn" data-subtab="jog-sub-ik" style="flex:1;">Direct IK</button>
+            <button class="jog-subtab-btn" data-subtab="jog-sub-dh" style="flex:1;">DH Table</button>
+          </div>
+
+          <!-- Subtab 1: Joint Jogger Sliders -->
+          <div id="jog-sub-joints" class="jog-subpane active">
+            <div id="jogger-sliders-container" class="glass-card" style="padding: 12px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px;">
+              <!-- Generated dynamically in JS based on active robot -->
+            </div>
+          </div>
+
+          <!-- Subtab 2: Direct Target IK (from testGUI 1, 2, 3) -->
+          <div id="jog-sub-ik" class="jog-subpane">
+            <section class="glass-card" style="padding: 12px; margin-bottom: 8px;">
+              <div style="font-size: 11px; font-weight: 700; color: var(--robot1-cyan); margin-bottom: 8px; text-transform: uppercase;">
+                <i class="fa fa-crosshairs"></i> Direct Target IK Solver
+              </div>
+              <div class="coord-inputs-3">
+                <div class="coord-field">
+                  <label for="input-single-ik-x">X (mm)</label>
+                  <input type="number" id="input-single-ik-x" class="input-control" value="200.0">
+                </div>
+                <div class="coord-field">
+                  <label for="input-single-ik-y">Y (mm)</label>
+                  <input type="number" id="input-single-ik-y" class="input-control" value="100.0">
+                </div>
+                <div class="coord-field">
+                  <label for="input-single-ik-z">Z (mm)</label>
+                  <input type="number" id="input-single-ik-z" class="input-control" value="150.0">
+                </div>
+              </div>
+              <button id="btn-solve-single-ik" class="btn btn-primary btn-full" style="margin-top: 8px; font-size: 11px;">
+                <i class="fa fa-calculator"></i> Solve IK &amp; Pose Arm
+              </button>
+              <div id="single-ik-feedback" style="margin-top: 6px; font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);">
+                Target ready for calculation.
+              </div>
+            </section>
+          </div>
+
+          <!-- Subtab 3: DH Parameters Table (from testGUI 1, 2, 3) -->
+          <div id="jog-sub-dh" class="jog-subpane">
+            <div class="glass-card" style="padding: 10px; margin-bottom: 8px; overflow-x: auto;">
+              <div style="font-size: 11px; font-weight: 700; color: var(--robot1-cyan); margin-bottom: 6px; text-transform: uppercase;">
+                <i class="fa fa-table"></i> Modified DH Parameters
+              </div>
+              <table id="dh-params-table" class="dh-table" style="width: 100%; font-size: 10px; font-family: var(--font-mono); border-collapse: collapse;">
+                <thead>
+                  <tr style="border-bottom: 1px solid rgba(255,255,255,0.15); color: var(--text-muted); text-align: left;">
+                    <th style="padding: 3px;">Joint</th>
+                    <th style="padding: 3px;">θ Off</th>
+                    <th style="padding: 3px;">d (mm)</th>
+                    <th style="padding: 3px;">a (mm)</th>
+                    <th style="padding: 3px;">α (°)</th>
+                    <th style="padding: 3px;">Limits</th>
+                  </tr>
+                </thead>
+                <tbody id="dh-params-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Quick Actions & Gripper Toggle -->
+          <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+            <button id="btn-jog-gripper" class="btn btn-glass btn-sm" style="flex: 1; font-size: 11px;">
+              <i class="fa fa-hand"></i> Toggle Gripper
+            </button>
+            <button id="btn-jog-home" class="btn btn-glass btn-sm" style="flex: 1; font-size: 11px;">
+              <i class="fa fa-house"></i> Home Arm
+            </button>
+          </div>
+
+          <!-- Live TCP Cartesian Position Readout (Forward Kinematics) -->
+          <div class="glass-card" style="padding: 10px; font-family: var(--font-mono); font-size: 11px;">
+            <div style="color: var(--text-dim); font-size: 10px; margin-bottom: 4px; display: flex; justify-content: space-between;">
+              <span>ACTIVE TCP POSE (WORLD FK)</span>
+              <span id="jog-fk-status" class="badge-tag">READY</span>
+            </div>
+            <div id="jog-tcp-world" style="color: var(--robot1-cyan); font-weight: 700;">X: --, Y: --, Z: -- mm</div>
+          </div>
+        </div>
+
+        <!-- ========================================================
+             PANEL 3: HANDOVER POSE INSPECTOR (STAGE 3 TEST 2)
+             ======================================================== -->
+        <div id="tab-inspector" class="sidebar-pane">
+          <section class="glass-card card-amber">
+            <div class="card-header">
+              <span class="card-title">
+                <i class="fa fa-handshake" style="color: var(--robot3-amber);"></i> Handover Solutions
+              </span>
+              <span class="badge-tag">TOP-OF-WS</span>
+            </div>
+
+            <div class="input-group" style="margin-bottom: 8px;">
+              <label for="select-inspector-pair" class="input-label">Select Robot Pair</label>
+              <select id="select-inspector-pair" class="input-control">
+                <option value="robot1_robot2">Robot 1 &lt;-&gt; Robot 2 (Center)</option>
+                <option value="robot2_robot3">Robot 2 &lt;-&gt; Robot 3 (South-East)</option>
+                <option value="robot3_robot1" selected>Robot 3 &lt;-&gt; Robot 1 (North-West)</option>
+              </select>
+            </div>
+
+            <div style="font-size: 11px; display: flex; flex-direction: column; gap: 6px; font-family: var(--font-mono); margin-bottom: 10px;">
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: var(--text-dim);">Coordinates:</span>
+                <strong id="ho-coords" style="color: var(--text-main);">[37.5, -37.5, 362.5] mm</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: var(--text-dim);">Approach Mode:</span>
+                <span id="ho-mode" style="color: var(--robot1-cyan);">DUAL_SYNCHRONIZED (50mm)</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: var(--text-dim);">Standoff Dist:</span>
+                <span id="ho-standoff" style="color: var(--status-safe);">50.0 mm (&gt;= 50mm safe)</span>
+              </div>
+            </div>
+
+            <!-- Handover 3D Posing Action Buttons (like Stage 3 Test 2 GUI) -->
+            <button id="btn-inspect-handover" class="btn btn-primary btn-full" style="margin-bottom: 6px;">
+              <i class="fa fa-eye"></i> 👁️ 3D Preview Handover
+            </button>
+            <button id="btn-inspect-pre" class="btn btn-glass btn-full" style="margin-bottom: 6px;">
+              <i class="fa fa-arrows-to-dot"></i> 👁️ Pre-Handover Stance
+            </button>
+            <button id="btn-inspect-home" class="btn btn-glass btn-full">
+              <i class="fa fa-house"></i> 🏠 Return All to Home
+            </button>
+          </section>
+        </div>
+
+      </aside>
+
+      <!-- CENTER 3D WEBGL VIEWPORT -->
+      <section id="viewport-container">
+        <canvas id="webgl-canvas"></canvas>
+
+        <!-- Floating HUD: 3D Transform Gizmo Mode Selector -->
+        <div class="viewport-hud hud-top-left">
+          <div style="display: flex; gap: 6px; background: rgba(12, 18, 32, 0.75); padding: 4px; border-radius: var(--radius-lg); border: 1px solid var(--border-subtle); backdrop-filter: blur(12px);">
+            <button id="btn-gizmo-translate" class="camera-btn active" title="Translate in 3D (X, Y, Z)">
+              <i class="fa fa-arrows-up-down-left-right"></i> Translate
+            </button>
+            <button id="btn-gizmo-rotate" class="camera-btn" title="Rotate Yaw (ψ)">
+              <i class="fa fa-rotate"></i> Rotate Yaw
+            </button>
+          </div>
+        </div>
+
+        <!-- Floating HUD: Real-time Clearance Gauge -->
+        <div class="viewport-hud hud-top-right">
+          <div class="clearance-gauge-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Body Clearance</span>
+              <span id="gauge-status-badge" class="badge-tag">SAFE</span>
+            </div>
+            <div class="gauge-numeric">
+              <span id="gauge-clearance-val">479.4</span>
+              <span class="gauge-unit">mm</span>
+            </div>
+            <div class="gauge-bar-track">
+              <div id="gauge-bar-fill" class="gauge-bar-fill"></div>
+            </div>
+            <div style="font-size: 10px; color: var(--text-dim); display: flex; justify-content: space-between;">
+              <span>Min safe: 45 mm</span>
+              <span>Nominal: &gt; 100 mm</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Floating HUD: Camera View Presets -->
+        <div class="viewport-hud hud-bottom-right">
+          <div class="camera-pills">
+            <button class="camera-btn active" data-preset="isometric">3D Orbit</button>
+            <button class="camera-btn" data-preset="top">Top-Down</button>
+            <button class="camera-btn" data-preset="front">Front</button>
+            <button class="camera-btn" data-preset="handover">Handover</button>
+            <button class="camera-btn" data-preset="r1">Robot 1</button>
+            <button class="camera-btn" data-preset="r2">Robot 2</button>
+            <button class="camera-btn" data-preset="r3">Robot 3</button>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- RIGHT SIDEBAR: TELEMETRY & SYSTEM LOG -->
+      <aside id="telemetry-sidebar">
+        <nav class="telemetry-tabs">
+          <button class="telemetry-tab active" data-target="tab-joints">Joint Telemetry</button>
+          <button class="telemetry-tab" data-target="tab-log">System Log Console</button>
+        </nav>
+
+        <!-- Tab 1: Joint Angles Table -->
+        <div id="tab-joints" class="tab-pane active">
+          <!-- Robot 1 Joint Card -->
+          <div class="glass-card card-cyan" style="padding: 10px;">
+            <div class="card-header" style="margin-bottom: 6px;">
+              <span class="card-title" style="font-size: 12px; color: var(--robot1-cyan);">
+                <i class="fa fa-robot"></i> Robot 1 (5-DOF, 0°)
+              </span>
+            </div>
+            <div id="joint-r1-table" class="joint-card"></div>
+          </div>
+
+          <!-- Robot 2 Joint Card -->
+          <div class="glass-card card-violet" style="padding: 10px;">
+            <div class="card-header" style="margin-bottom: 6px;">
+              <span class="card-title" style="font-size: 12px; color: var(--robot2-violet);">
+                <i class="fa fa-robot"></i> Robot 2 (5-DOF, 180°)
+              </span>
+            </div>
+            <div id="joint-r2-table" class="joint-card"></div>
+          </div>
+
+          <!-- Robot 3 Joint Card -->
+          <div class="glass-card card-amber" style="padding: 10px;">
+            <div class="card-header" style="margin-bottom: 6px;">
+              <span class="card-title" style="font-size: 12px; color: var(--robot3-amber);">
+                <i class="fa fa-robot"></i> Robot 3 (6-DOF, 90°)
+              </span>
+            </div>
+            <div id="joint-r3-table" class="joint-card"></div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Terminal Log -->
+        <div id="tab-log" class="tab-pane">
+          <div id="terminal-log">
+            <div class="log-entry log-info"><span class="log-time">[BOOT]</span> Initializing rt_AI 3D Web Digital Twin System...</div>
+          </div>
+        </div>
+      </aside>
+
+    </main>
+
+    <!-- ============================================================
+         BOTTOM TIMELINE & PLAYBACK FOOTER
+         ============================================================ -->
+    <footer id="timeline-bar">
+      
+      <div class="playback-controls">
+        <button id="btn-play-pause" class="btn btn-success btn-sm">
+          <i class="fa fa-play"></i> Simulate
+        </button>
+        <button id="btn-reset" class="btn btn-glass btn-sm" title="Reset to beginning">
+          <i class="fa fa-backward-step"></i>
+        </button>
+        <select id="select-playback-speed" class="input-control" style="width: 75px; padding: 5px;">
+          <option value="0.5">0.5x</option>
+          <option value="1.0" selected>1.0x</option>
+          <option value="2.0">2.0x</option>
+        </select>
+      </div>
+
+      <div class="timeline-scrubber-wrapper">
+        <div class="timeline-header">
+          <span id="timeline-phase-badge" class="phase-pill-badge">Idle (Waiting for plan)</span>
+          <span id="timeline-step-counter">Step 0 / 0</span>
+        </div>
+        <input type="range" id="timeline-slider" class="timeline-slider" min="0" max="0" value="0">
+      </div>
+
+      <div style="display: flex; gap: 10px;">
+        <button id="btn-execute" class="btn btn-danger btn-sm" title="Safety-gated physical execution on real robots">
+          <i class="fa fa-play-circle"></i> Execute on Hardware
+        </button>
+      </div>
+
+    </footer>
+
+    <!-- ============================================================
+         INTERACTIVE MODAL: MULTI-ROBOT CHOOSER
+         ============================================================ -->
+    <div id="modal-robot-chooser" class="modal-overlay">
+      <div class="modal-card">
+        <div class="modal-title">
+          <i class="fa fa-code-fork" style="color: var(--robot1-cyan);"></i> Multi-Robot Workspace Intersection
+        </div>
+        <div class="modal-body">
+          Target coordinates fall inside the overlapping reach envelope of multiple robots. Please choose which robot performs Pick and which performs Place:
+        </div>
+
+        <div style="font-size: 11px; font-weight: 600; color: var(--robot1-cyan); text-transform: uppercase; margin-bottom: 6px;">Select Pick Robot:</div>
+        <div id="chooser-pick-candidates" class="modal-options-grid"></div>
+
+        <div style="font-size: 11px; font-weight: 600; color: var(--robot2-violet); text-transform: uppercase; margin-bottom: 6px; margin-top: 12px;">Select Place Robot:</div>
+        <div id="chooser-place-candidates" class="modal-options-grid"></div>
+
+        <div class="modal-footer">
+          <button id="btn-cancel-choice" class="btn btn-glass btn-sm">Cancel</button>
+          <button id="btn-confirm-choice" class="btn btn-primary btn-sm">Confirm &amp; Plan</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         SOLUTION SUMMARY DIALOG (STAGE 3 TEST 2 CONFIRMATION)
+         ============================================================ -->
+    <div id="modal-solution-summary" class="modal-overlay">
+      <div class="modal-card" style="width: 520px;">
+        <div class="modal-title" style="color: var(--robot1-cyan);">
+          <i class="fa fa-clipboard-check"></i> Stage 3 Test 2 — Execution Solution Summary
+        </div>
+        <div class="modal-body" style="margin: 12px 0;">
+          <div style="background: rgba(255, 255, 255, 0.04); border-radius: var(--radius-md); padding: 12px; margin-bottom: 12px; font-family: var(--font-mono); font-size: 12px; line-height: 1.8;">
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 4px;">
+              <span style="color: var(--text-dim);">Task Route:</span>
+              <strong id="summary-route" style="color: var(--text-main);">ROBOT 3 ➔ ROBOT 1</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); padding: 4px 0;">
+              <span style="color: var(--text-dim);">Pick Assignment:</span>
+              <span id="summary-pick-solver" style="color: var(--robot1-cyan);">ROBOT 3 (tilt 30.0°)</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); padding: 4px 0;">
+              <span style="color: var(--text-dim);">Place Assignment:</span>
+              <span id="summary-place-solver" style="color: var(--robot2-violet);">ROBOT 1 (tilt 0.0°)</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); padding: 4px 0;">
+              <span style="color: var(--text-dim);">Handover Staging:</span>
+              <span id="summary-ho-mode" style="color: var(--robot3-amber);">TOP-OF-WORKSPACE (DUAL_SYNCHRONIZED)</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); padding: 4px 0;">
+              <span style="color: var(--text-dim);">Handover Target:</span>
+              <span id="summary-ho-coords" style="color: var(--text-main);">[-12.5, 87.5, 212.5] mm</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); padding: 4px 0;">
+              <span style="color: var(--text-dim);">Standoff Distance:</span>
+              <span id="summary-standoff" style="color: var(--status-safe);">50.0 mm</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding-top: 4px;">
+              <span style="color: var(--text-dim);">Min Body Clearance:</span>
+              <strong id="summary-clearance" style="color: var(--status-safe);">48.2 mm (&gt; 45.0 mm Safe Limit)</strong>
+            </div>
+          </div>
+          <div style="font-size: 11px; color: var(--text-dim);">Choose whether to preview the synchronized 9-phase trajectory in 3D simulation or authorize real robot hardware execution.</div>
+        </div>
+        <div class="modal-footer" style="display: flex; justify-content: space-between;">
+          <button id="btn-summary-dismiss" class="btn btn-glass btn-sm">Close</button>
+          <div style="display: flex; gap: 8px;">
+            <button id="btn-summary-simulate" class="btn btn-success btn-sm">
+              <i class="fa fa-play"></i> ▶ 3D Simulation Preview
+            </button>
+            <button id="btn-summary-execute" class="btn btn-danger btn-sm">
+              <i class="fa fa-bolt"></i> ⚡ Real Robot Hardware
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================
+         SAFETY CONFIRMATION MODAL: HARDWARE EXECUTION
+         ============================================================ -->
+    <div id="modal-safety-gate" class="modal-overlay">
+      <div class="modal-card" style="border-color: rgba(239, 68, 68, 0.4); box-shadow: 0 0 30px rgba(239, 68, 68, 0.25);">
+        <div class="modal-title" style="color: var(--status-danger);">
+          <i class="fa fa-triangle-exclamation"></i> Safety Confirmation: Real Hardware Motion
+        </div>
+        <div class="modal-body">
+          <p>You are about to command the <strong>physical robotic arms</strong> across the UART serial bridge.</p>
+          <p style="margin-top: 8px;">Minimum Verified Clearance: <strong id="modal-clearance-val" style="color: var(--status-safe);">-- mm</strong> (&gt; 45 mm Safe Gate).</p>
+          <p style="margin-top: 8px; color: var(--text-dim); font-size: 11px;">Ensure the shared workcell table is clear of unintended obstacles before proceeding.</p>
+        </div>
+        <div class="modal-footer">
+          <button id="btn-cancel-execute" class="btn btn-glass btn-sm">Abort</button>
+          <button id="btn-confirm-execute" class="btn btn-danger btn-sm">
+            <i class="fa fa-check"></i> Authorize Physical Motion
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Main JavaScript App Entrypoint -->
+  <script src="/static/js/robot_models.js"></script>
+  <script src="/static/js/laser_gauge.js"></script>
+  <script src="/static/js/scene.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
