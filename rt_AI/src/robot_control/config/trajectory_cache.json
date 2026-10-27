@@ -3603,6 +3603,1299 @@
               "solution_count": 11
             }
           }
+        },
+        "150.0,99.3,180.0,0.0": {
+          "xyz_world": [
+            150.0,
+            99.3,
+            180.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:17:40",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                99.3,
+                180.0
+              ],
+              "xyz_base": [
+                400.0,
+                99.3,
+                180.0
+              ],
+              "q_deg": [
+                13.94,
+                -58.67,
+                -5.55,
+                36.43,
+                -1.79
+              ],
+              "error_mm": 0.714,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 0.0,
+              "alignment_error_deg": 4.35,
+              "score": 51.33,
+              "solution_count": 2
+            }
+          }
+        },
+        "150.0,103.6,180.0,0.0": {
+          "xyz_world": [
+            150.0,
+            103.6,
+            180.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:17:51",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                103.6,
+                180.0
+              ],
+              "xyz_base": [
+                400.0,
+                103.6,
+                180.0
+              ],
+              "q_deg": [
+                14.52,
+                -55.62,
+                -11.92,
+                32.13,
+                -1.63
+              ],
+              "error_mm": 0.693,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 0.0,
+              "alignment_error_deg": 4.93,
+              "score": 53.48,
+              "solution_count": 2
+            }
+          }
+        },
+        "150.0,108.0,180.0,0.0": {
+          "xyz_world": [
+            150.0,
+            108.0,
+            180.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:18:02",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                108.0,
+                180.0
+              ],
+              "xyz_base": [
+                400.0,
+                108.0,
+                180.0
+              ],
+              "q_deg": [
+                15.11,
+                -56.2,
+                -11.61,
+                31.4,
+                -1.7
+              ],
+              "error_mm": 0.698,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 0.0,
+              "alignment_error_deg": 4.57,
+              "score": 52.95,
+              "solution_count": 2
+            }
+          }
+        },
+        "150.0,112.6,180.0,0.0": {
+          "xyz_world": [
+            150.0,
+            112.6,
+            180.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:18:12",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                112.6,
+                180.0
+              ],
+              "xyz_base": [
+                400.0,
+                112.6,
+                180.0
+              ],
+              "q_deg": [
+                15.72,
+                -56.85,
+                -11.25,
+                30.58,
+                -1.79
+              ],
+              "error_mm": 0.704,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 0.0,
+              "alignment_error_deg": 4.03,
+              "score": 51.74,
+              "solution_count": 3
+            }
+          }
+        },
+        "150.0,114.1,180.0,0.0": {
+          "xyz_world": [
+            150.0,
+            114.1,
+            180.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:18:22",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                114.1,
+                180.0
+              ],
+              "xyz_base": [
+                400.0,
+                114.1,
+                180.0
+              ],
+              "q_deg": [
+                15.92,
+                -57.07,
+                -11.13,
+                30.3,
+                -1.82
+              ],
+              "error_mm": 0.706,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 0.0,
+              "alignment_error_deg": 3.81,
+              "score": 51.18,
+              "solution_count": 3
+            }
+          }
+        },
+        "150.0,118.3,180.0,0.0": {
+          "xyz_world": [
+            150.0,
+            118.3,
+            180.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:18:33",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                118.3,
+                180.0
+              ],
+              "xyz_base": [
+                400.0,
+                118.3,
+                180.0
+              ],
+              "q_deg": [
+                16.48,
+                -66.83,
+                5.19,
+                36.77,
+                -1.76
+              ],
+              "error_mm": 0.69,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 0.0,
+              "alignment_error_deg": 4.6,
+              "score": 55.32,
+              "solution_count": 3
+            }
+          }
+        },
+        "150.0,122.7,180.0,0.0": {
+          "xyz_world": [
+            150.0,
+            122.7,
+            180.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:18:44",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                122.7,
+                180.0
+              ],
+              "xyz_base": [
+                400.0,
+                122.7,
+                180.0
+              ],
+              "q_deg": [
+                17.05,
+                -67.59,
+                5.6,
+                35.79,
+                -1.84
+              ],
+              "error_mm": 0.697,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 0.0,
+              "alignment_error_deg": 3.73,
+              "score": 52.71,
+              "solution_count": 4
+            }
+          }
+        },
+        "150.0,127.4,180.0,0.0": {
+          "xyz_world": [
+            150.0,
+            127.4,
+            180.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:18:54",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                127.4,
+                180.0
+              ],
+              "xyz_base": [
+                400.0,
+                127.4,
+                180.0
+              ],
+              "q_deg": [
+                17.67,
+                -73.47,
+                13.68,
+                36.44,
+                -1.52
+              ],
+              "error_mm": 0.685,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 0.0,
+              "alignment_error_deg": 3.96,
+              "score": 54.27,
+              "solution_count": 2
+            }
+          }
+        },
+        "150.0,134.0,180.0,0.0": {
+          "xyz_world": [
+            150.0,
+            134.0,
+            180.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:19:05",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                134.0,
+                180.0
+              ],
+              "xyz_base": [
+                400.0,
+                134.0,
+                180.0
+              ],
+              "q_deg": [
+                18.52,
+                -69.81,
+                6.82,
+                32.93,
+                -1.56
+              ],
+              "error_mm": 0.72,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 0.0,
+              "alignment_error_deg": 3.76,
+              "score": 55.27,
+              "solution_count": 2
+            }
+          }
+        },
+        "150.0,138.7,180.0,0.0": {
+          "xyz_world": [
+            150.0,
+            138.7,
+            180.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:19:15",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                138.7,
+                180.0
+              ],
+              "xyz_base": [
+                400.0,
+                138.7,
+                180.0
+              ],
+              "q_deg": [
+                19.12,
+                -61.6,
+                -8.45,
+                24.9,
+                -1.35
+              ],
+              "error_mm": 0.763,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 0.0,
+              "alignment_error_deg": 3.9,
+              "score": 57.39,
+              "solution_count": 2
+            }
+          }
+        },
+        "150.0,142.9,180.0,0.0": {
+          "xyz_world": [
+            150.0,
+            142.9,
+            180.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:19:25",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                142.9,
+                180.0
+              ],
+              "xyz_base": [
+                400.0,
+                142.9,
+                180.0
+              ],
+              "q_deg": [
+                19.66,
+                -58.92,
+                -15.2,
+                19.0,
+                -1.08
+              ],
+              "error_mm": 0.842,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 0.0,
+              "alignment_error_deg": 0.59,
+              "score": 47.08,
+              "solution_count": 3
+            }
+          }
+        },
+        "150.0,149.8,180.0,0.0": {
+          "xyz_world": [
+            150.0,
+            149.8,
+            180.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:19:35",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                149.8,
+                180.0
+              ],
+              "xyz_base": [
+                400.0,
+                149.8,
+                180.0
+              ],
+              "q_deg": [
+                20.53,
+                -64.34,
+                -6.8,
+                21.62,
+                -0.9
+              ],
+              "error_mm": 0.781,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 0.0,
+              "alignment_error_deg": 2.52,
+              "score": 54.65,
+              "solution_count": 1
+            }
+          }
+        },
+        "150.0,156.9,180.0,0.0": {
+          "xyz_world": [
+            150.0,
+            156.9,
+            180.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:19:45",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                156.9,
+                180.0
+              ],
+              "xyz_base": [
+                400.0,
+                156.9,
+                180.0
+              ],
+              "q_deg": [
+                21.42,
+                -69.98,
+                0.08,
+                20.87,
+                -0.36
+              ],
+              "error_mm": 0.178,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 10.0,
+              "alignment_error_deg": 3.65,
+              "score": 57.02,
+              "solution_count": 1
+            }
+          }
+        },
+        "-198.9,150.0,150.0,0.0": {
+          "xyz_world": [
+            -198.9,
+            150.0,
+            150.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": true,
+          "timestamp": "2026-10-26T20:47:37",
+          "solutions": {
+            "robot3": {
+              "robot_id": "robot3",
+              "xyz_world": [
+                -198.9,
+                150.0,
+                150.0
+              ],
+              "xyz_base": [
+                -100.0,
+                198.9,
+                150.0
+              ],
+              "q_deg": [
+                89.96,
+                -24.82,
+                -44.6,
+                -62.55,
+                -19.76,
+                -21.85
+              ],
+              "error_mm": 0.017,
+              "solver_type": "normal_ik",
+              "is_fallback": true,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": null,
+              "alignment_error_deg": null,
+              "score": 0.02,
+              "solution_count": 1
+            }
+          }
+        },
+        "-181.9,150.0,150.0,0.0": {
+          "xyz_world": [
+            -181.9,
+            150.0,
+            150.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:47:55",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                -181.9,
+                150.0,
+                150.0
+              ],
+              "xyz_base": [
+                68.1,
+                150.0,
+                150.0
+              ],
+              "q_deg": [
+                65.58,
+                47.22,
+                -89.41,
+                89.87,
+                -57.18
+              ],
+              "error_mm": 0.173,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 90.0,
+              "alignment_error_deg": 1.05,
+              "score": 31.85,
+              "solution_count": 1
+            }
+          }
+        },
+        "-175.3,150.0,150.0,0.0": {
+          "xyz_world": [
+            -175.3,
+            150.0,
+            150.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:48:12",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                -175.3,
+                150.0,
+                150.0
+              ],
+              "xyz_base": [
+                74.7,
+                150.0,
+                150.0
+              ],
+              "q_deg": [
+                63.53,
+                44.92,
+                -87.9,
+                89.79,
+                -57.45
+              ],
+              "error_mm": 0.1,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 90.0,
+              "alignment_error_deg": 3.04,
+              "score": 37.36,
+              "solution_count": 1
+            }
+          }
+        },
+        "-164.6,150.0,150.0,0.0": {
+          "xyz_world": [
+            -164.6,
+            150.0,
+            150.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:48:45",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                -164.6,
+                150.0,
+                150.0
+              ],
+              "xyz_base": [
+                85.4,
+                150.0,
+                150.0
+              ],
+              "q_deg": [
+                60.35,
+                42.17,
+                -86.47,
+                88.93,
+                -49.84
+              ],
+              "error_mm": 0.112,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 90.0,
+              "alignment_error_deg": 0.38,
+              "score": 23.09,
+              "solution_count": 2
+            }
+          }
+        },
+        "150.0,101.4,179.1,0.0": {
+          "xyz_world": [
+            150.0,
+            101.4,
+            179.1
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:48:55",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                101.4,
+                179.1
+              ],
+              "xyz_base": [
+                400.0,
+                101.4,
+                179.1
+              ],
+              "q_deg": [
+                14.22,
+                -64.36,
+                3.77,
+                40.1,
+                -1.83
+              ],
+              "error_mm": 0.67,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 0.0,
+              "alignment_error_deg": 4.46,
+              "score": 51.74,
+              "solution_count": 2
+            }
+          }
+        },
+        "-152.1,150.0,150.0,0.0": {
+          "xyz_world": [
+            -152.1,
+            150.0,
+            150.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:49:21",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                -152.1,
+                150.0,
+                150.0
+              ],
+              "xyz_base": [
+                97.9,
+                150.0,
+                150.0
+              ],
+              "q_deg": [
+                56.87,
+                39.77,
+                -85.69,
+                87.24,
+                -48.43
+              ],
+              "error_mm": 0.124,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 90.0,
+              "alignment_error_deg": 1.89,
+              "score": 26.88,
+              "solution_count": 1
+            }
+          }
+        },
+        "150.0,101.5,180.3,0.0": {
+          "xyz_world": [
+            150.0,
+            101.5,
+            180.3
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": false,
+          "timestamp": "2026-10-26T20:49:30",
+          "solutions": {
+            "robot1": {
+              "robot_id": "robot1",
+              "xyz_world": [
+                150.0,
+                101.5,
+                180.3
+              ],
+              "xyz_base": [
+                400.0,
+                101.5,
+                180.3
+              ],
+              "q_deg": [
+                14.24,
+                -64.37,
+                3.89,
+                39.93,
+                -1.82
+              ],
+              "error_mm": 0.671,
+              "solver_type": "object_pick_ik",
+              "is_fallback": false,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": 0.0,
+              "alignment_error_deg": 4.23,
+              "score": 51.05,
+              "solution_count": 3
+            }
+          }
+        },
+        "-198.7,148.6,150.0,0.0": {
+          "xyz_world": [
+            -198.7,
+            148.6,
+            150.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": true,
+          "timestamp": "2026-10-26T21:00:49",
+          "solutions": {
+            "robot3": {
+              "robot_id": "robot3",
+              "xyz_world": [
+                -198.7,
+                148.6,
+                150.0
+              ],
+              "xyz_base": [
+                -101.4,
+                198.7,
+                150.0
+              ],
+              "q_deg": [
+                89.98,
+                -19.18,
+                -55.13,
+                -54.87,
+                -14.62,
+                -7.17
+              ],
+              "error_mm": 0.016,
+              "solver_type": "normal_ik",
+              "is_fallback": true,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": null,
+              "alignment_error_deg": null,
+              "score": 0.02,
+              "solution_count": 1
+            }
+          }
+        },
+        "-189.4,141.0,150.0,0.0": {
+          "xyz_world": [
+            -189.4,
+            141.0,
+            150.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": true,
+          "timestamp": "2026-10-26T21:01:33",
+          "solutions": {
+            "robot3": {
+              "robot_id": "robot3",
+              "xyz_world": [
+                -189.4,
+                141.0,
+                150.0
+              ],
+              "xyz_base": [
+                -109.0,
+                189.4,
+                150.0
+              ],
+              "q_deg": [
+                59.5,
+                -11.16,
+                -89.22,
+                -78.27,
+                24.98,
+                35.9
+              ],
+              "error_mm": 0.02,
+              "solver_type": "normal_ik",
+              "is_fallback": true,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": null,
+              "alignment_error_deg": null,
+              "score": 0.02,
+              "solution_count": 1
+            }
+          }
+        },
+        "-179.8,136.1,150.0,0.0": {
+          "xyz_world": [
+            -179.8,
+            136.1,
+            150.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": true,
+          "timestamp": "2026-10-26T21:02:17",
+          "solutions": {
+            "robot3": {
+              "robot_id": "robot3",
+              "xyz_world": [
+                -179.8,
+                136.1,
+                150.0
+              ],
+              "xyz_base": [
+                -113.9,
+                179.8,
+                150.0
+              ],
+              "q_deg": [
+                89.94,
+                -23.87,
+                -43.0,
+                -75.29,
+                -17.42,
+                -19.06
+              ],
+              "error_mm": 0.018,
+              "solver_type": "normal_ik",
+              "is_fallback": true,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": null,
+              "alignment_error_deg": null,
+              "score": 0.02,
+              "solution_count": 1
+            }
+          }
+        },
+        "-175.1,133.7,150.0,0.0": {
+          "xyz_world": [
+            -175.1,
+            133.7,
+            150.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": true,
+          "timestamp": "2026-10-26T21:03:00",
+          "solutions": {
+            "robot3": {
+              "robot_id": "robot3",
+              "xyz_world": [
+                -175.1,
+                133.7,
+                150.0
+              ],
+              "xyz_base": [
+                -116.3,
+                175.1,
+                150.0
+              ],
+              "q_deg": [
+                81.67,
+                -14.36,
+                -61.84,
+                -73.02,
+                -3.66,
+                -14.28
+              ],
+              "error_mm": 0.021,
+              "solver_type": "normal_ik",
+              "is_fallback": true,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": null,
+              "alignment_error_deg": null,
+              "score": 0.02,
+              "solution_count": 1
+            }
+          }
+        },
+        "-164.2,127.1,150.0,0.0": {
+          "xyz_world": [
+            -164.2,
+            127.1,
+            150.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": true,
+          "timestamp": "2026-10-26T21:03:44",
+          "solutions": {
+            "robot3": {
+              "robot_id": "robot3",
+              "xyz_world": [
+                -164.2,
+                127.1,
+                150.0
+              ],
+              "xyz_base": [
+                -122.9,
+                164.2,
+                150.0
+              ],
+              "q_deg": [
+                69.18,
+                -16.39,
+                -65.21,
+                -88.93,
+                10.71,
+                -26.2
+              ],
+              "error_mm": 0.02,
+              "solver_type": "normal_ik",
+              "is_fallback": true,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": null,
+              "alignment_error_deg": null,
+              "score": 0.02,
+              "solution_count": 1
+            }
+          }
+        },
+        "-159.6,124.8,150.0,0.0": {
+          "xyz_world": [
+            -159.6,
+            124.8,
+            150.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": true,
+          "timestamp": "2026-10-26T21:04:28",
+          "solutions": {
+            "robot3": {
+              "robot_id": "robot3",
+              "xyz_world": [
+                -159.6,
+                124.8,
+                150.0
+              ],
+              "xyz_base": [
+                -125.2,
+                159.6,
+                150.0
+              ],
+              "q_deg": [
+                89.98,
+                -14.19,
+                -58.63,
+                -72.58,
+                -11.24,
+                26.84
+              ],
+              "error_mm": 0.024,
+              "solver_type": "normal_ik",
+              "is_fallback": true,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": null,
+              "alignment_error_deg": null,
+              "score": 0.02,
+              "solution_count": 1
+            }
+          }
+        },
+        "-156.4,121.2,150.0,0.0": {
+          "xyz_world": [
+            -156.4,
+            121.2,
+            150.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": true,
+          "timestamp": "2026-10-26T21:05:11",
+          "solutions": {
+            "robot3": {
+              "robot_id": "robot3",
+              "xyz_world": [
+                -156.4,
+                121.2,
+                150.0
+              ],
+              "xyz_base": [
+                -128.8,
+                156.4,
+                150.0
+              ],
+              "q_deg": [
+                90.0,
+                -2.12,
+                -78.88,
+                -59.42,
+                -2.27,
+                68.82
+              ],
+              "error_mm": 0.017,
+              "solver_type": "normal_ik",
+              "is_fallback": true,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": null,
+              "alignment_error_deg": null,
+              "score": 0.02,
+              "solution_count": 1
+            }
+          }
+        },
+        "-195.1,143.1,132.1,0.0": {
+          "xyz_world": [
+            -195.1,
+            143.1,
+            132.1
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": true,
+          "timestamp": "2026-10-26T21:06:08",
+          "solutions": {
+            "robot3": {
+              "robot_id": "robot3",
+              "xyz_world": [
+                -195.1,
+                143.1,
+                132.1
+              ],
+              "xyz_base": [
+                -106.9,
+                195.1,
+                132.1
+              ],
+              "q_deg": [
+                53.02,
+                -39.75,
+                -86.39,
+                -89.84,
+                32.81,
+                44.87
+              ],
+              "error_mm": 0.027,
+              "solver_type": "normal_ik",
+              "is_fallback": true,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": null,
+              "alignment_error_deg": null,
+              "score": 0.03,
+              "solution_count": 1
+            }
+          }
+        },
+        "-190.2,137.8,119.0,0.0": {
+          "xyz_world": [
+            -190.2,
+            137.8,
+            119.0
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": true,
+          "timestamp": "2026-10-26T21:06:52",
+          "solutions": {
+            "robot3": {
+              "robot_id": "robot3",
+              "xyz_world": [
+                -190.2,
+                137.8,
+                119.0
+              ],
+              "xyz_base": [
+                -112.2,
+                190.2,
+                119.0
+              ],
+              "q_deg": [
+                62.39,
+                -40.8,
+                -63.18,
+                -89.82,
+                20.03,
+                24.76
+              ],
+              "error_mm": 0.017,
+              "solver_type": "normal_ik",
+              "is_fallback": true,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": null,
+              "alignment_error_deg": null,
+              "score": 0.02,
+              "solution_count": 1
+            }
+          }
+        },
+        "-182.8,131.7,104.9,0.0": {
+          "xyz_world": [
+            -182.8,
+            131.7,
+            104.9
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": true,
+          "timestamp": "2026-10-26T21:07:35",
+          "solutions": {
+            "robot3": {
+              "robot_id": "robot3",
+              "xyz_world": [
+                -182.8,
+                131.7,
+                104.9
+              ],
+              "xyz_base": [
+                -118.3,
+                182.8,
+                104.9
+              ],
+              "q_deg": [
+                56.0,
+                -54.93,
+                -87.59,
+                -89.83,
+                30.37,
+                -15.81
+              ],
+              "error_mm": 0.017,
+              "solver_type": "normal_ik",
+              "is_fallback": true,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": null,
+              "alignment_error_deg": null,
+              "score": 0.02,
+              "solution_count": 1
+            }
+          }
+        },
+        "-179.2,129.1,99.2,0.0": {
+          "xyz_world": [
+            -179.2,
+            129.1,
+            99.2
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": true,
+          "timestamp": "2026-10-26T21:08:19",
+          "solutions": {
+            "robot3": {
+              "robot_id": "robot3",
+              "xyz_world": [
+                -179.2,
+                129.1,
+                99.2
+              ],
+              "xyz_base": [
+                -120.9,
+                179.2,
+                99.2
+              ],
+              "q_deg": [
+                72.5,
+                -24.29,
+                -89.33,
+                -67.23,
+                17.2,
+                54.72
+              ],
+              "error_mm": 0.017,
+              "solver_type": "normal_ik",
+              "is_fallback": true,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": null,
+              "alignment_error_deg": null,
+              "score": 0.02,
+              "solution_count": 1
+            }
+          }
+        },
+        "-172.5,124.9,90.3,0.0": {
+          "xyz_world": [
+            -172.5,
+            124.9,
+            90.3
+          ],
+          "yaw_deg": 0.0,
+          "is_fallback": true,
+          "timestamp": "2026-10-26T21:09:02",
+          "solutions": {
+            "robot3": {
+              "robot_id": "robot3",
+              "xyz_world": [
+                -172.5,
+                124.9,
+                90.3
+              ],
+              "xyz_base": [
+                -125.1,
+                172.5,
+                90.3
+              ],
+              "q_deg": [
+                57.54,
+                -63.74,
+                -87.49,
+                -89.89,
+                28.41,
+                29.23
+              ],
+              "error_mm": 0.024,
+              "solver_type": "normal_ik",
+              "is_fallback": true,
+              "requested_yaw_deg": 0.0,
+              "approach_tilt_deg": null,
+              "alignment_error_deg": null,
+              "score": 0.02,
+              "solution_count": 1
+            }
+          }
         }
       }
     }

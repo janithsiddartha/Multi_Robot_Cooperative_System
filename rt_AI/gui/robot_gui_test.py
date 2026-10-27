@@ -15,17 +15,35 @@ from std_msgs.msg import Float64MultiArray
 from std_msgs.msg import Int32
 from std_msgs.msg import String
 
+import os
+import sys
+import threading
+import time
+from pathlib import Path
+
 import numpy as np
 import serial.tools.list_ports
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from mpl_toolkits.mplot3d import Axes3D
 
+# Ensure robot_control is in sys.path
+_current_file = Path(__file__).resolve()
+for _parent in [_current_file.parent, *_current_file.parents]:
+    _src_candidate = _parent / 'src' / 'robot_control'
+    if _src_candidate.is_dir() and str(_src_candidate) not in sys.path:
+        sys.path.insert(0, str(_src_candidate))
+        break
+
 from robot_control.kinematics.robot_kinematics import KinematicsConfig
 from robot_control.kinematics.fk_math import mdh_matrix, dh_joint_angles, all_frame_positions
+from robot_control.handover.object_pick_ik import solve_object_pick_ik
+from robot_control.handover.stage1_ik import solve_stage1_ik
+from robot_control.handover.stage1 import generate_interpolated_path, load_stage1_robots
 
 import tkinter as tk
 from tkinter import ttk
+
 
 
 # ============================================================
@@ -258,6 +276,31 @@ class RobotGUI(Node):
         GRIPPER_OPEN_ANGLE = self.config.gripper_open_angle
         GRIPPER_CLOSE_ANGLE = self.config.gripper_close_angle
 
+        self.robot_id = namespace if namespace else 'robot1'
+        try:
+            _, all_robots, _ = load_stage1_robots()
+            self.solver_cfg = all_robots.get(self.robot_id, self.config)
+        except Exception:
+            self.solver_cfg = self.config
+
+        if not hasattr(self.solver_cfg, 'world_base_xyz'):
+            self.solver_cfg.world_base_xyz = np.zeros(3)
+        if not hasattr(self.solver_cfg, 'world_base_R'):
+            self.solver_cfg.world_base_R = np.eye(3)
+        if not hasattr(self.solver_cfg, 'gripper_finger_axis'):
+            self.solver_cfg.gripper_finger_axis = 'x'
+        if not hasattr(self.solver_cfg, 'gripper_approach_axis'):
+            self.solver_cfg.gripper_approach_axis = 'z'
+
+        self.dwell_time_s = 0.5
+        self.pick_wait_s = 1.0
+        self.place_wait_s = 1.0
+        self.step_interval_s = 0.04
+        self.trajectory_steps = 25
+        self.is_trajectory_running = False
+        self.abort_trajectory = False
+        self.trajectory_thread = None
+
         # ====================================================
         # CONTROL MODE QoS
         #
@@ -351,6 +394,22 @@ class RobotGUI(Node):
 
             10
 
+        )
+
+
+        # ----------------------------------------------------
+        # TRAJECTORY JOINT & GRIPPER COMMANDS (Stage 3 Test 2 Engine)
+        # ----------------------------------------------------
+        self.trajectory_joint_pub = self.create_publisher(
+            Float64MultiArray,
+            'trajectory_joint_command',
+            10
+        )
+
+        self.trajectory_gripper_pub = self.create_publisher(
+            Float64MultiArray,
+            'trajectory_gripper_command',
+            10
         )
 
 
@@ -794,8 +853,50 @@ class RobotGUI(Node):
 
         self.tab_content_container = RoundedFrame(main_frame, bg_color=self.bg_color, card_color=self.card_color, border_color=self.panel_border, radius=12, shadow=True)
         self.tab_content_container.grid(row=2, column=0, sticky="nsew")
-        self.tab_inner = tk.Frame(self.tab_content_container, bg=self.card_color)
-        self.tab_inner.pack(fill='both', expand=True, padx=16, pady=4)
+        
+        # Scrollable Tab Container (applies to every tab)
+        self.tab_scroll_host = tk.Frame(self.tab_content_container, bg=self.card_color)
+        self.tab_scroll_host.pack(fill='both', expand=True, padx=(12, 6), pady=4)
+
+        self.tab_canvas = tk.Canvas(self.tab_scroll_host, bg=self.card_color, highlightthickness=0)
+        self.tab_scrollbar = ttk.Scrollbar(self.tab_scroll_host, orient="vertical", command=self.tab_canvas.yview)
+        self.tab_canvas.configure(yscrollcommand=self.tab_scrollbar.set)
+
+        self.tab_scrollbar.pack(side="right", fill="y", padx=(2, 0))
+        self.tab_canvas.pack(side="left", fill="both", expand=True)
+
+        self.tab_inner = tk.Frame(self.tab_canvas, bg=self.card_color)
+        self.tab_canvas_window = self.tab_canvas.create_window((0, 0), window=self.tab_inner, anchor="nw")
+
+        def _on_tab_canvas_configure(event):
+            self.tab_canvas.itemconfig(self.tab_canvas_window, width=event.width)
+
+        def _on_tab_inner_configure(event):
+            self.tab_canvas.configure(scrollregion=self.tab_canvas.bbox("all"))
+
+        self.tab_canvas.bind("<Configure>", _on_tab_canvas_configure)
+        self.tab_inner.bind("<Configure>", _on_tab_inner_configure)
+
+        def _on_tab_mousewheel(event):
+            if event.num == 4:
+                self.tab_canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                self.tab_canvas.yview_scroll(1, "units")
+            elif hasattr(event, 'delta') and event.delta:
+                self.tab_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _bind_tab_mousewheel(event):
+            self.tab_canvas.bind_all("<Button-4>", _on_tab_mousewheel)
+            self.tab_canvas.bind_all("<Button-5>", _on_tab_mousewheel)
+            self.tab_canvas.bind_all("<MouseWheel>", _on_tab_mousewheel)
+
+        def _unbind_tab_mousewheel(event):
+            self.tab_canvas.unbind_all("<Button-4>")
+            self.tab_canvas.unbind_all("<Button-5>")
+            self.tab_canvas.unbind_all("<MouseWheel>")
+
+        self.tab_content_container.bind("<Enter>", _bind_tab_mousewheel)
+        self.tab_content_container.bind("<Leave>", _unbind_tab_mousewheel)
         
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(0, weight=1) # Persistent area (shorter)
@@ -839,6 +940,12 @@ class RobotGUI(Node):
         self.tab_buttons[tab_name].fg_color = "#FFFFFF"
         self.tab_buttons[tab_name].draw()
         self.current_tab = tab_name
+
+        if hasattr(self, 'tab_canvas'):
+            self.root.after_idle(lambda: (
+                self.tab_canvas.yview_moveto(0.0),
+                self.tab_canvas.configure(scrollregion=self.tab_canvas.bbox("all"))
+            ))
 
     # ========================================================
     # STYLE
@@ -1053,10 +1160,11 @@ class RobotGUI(Node):
         return label
 
     def create_direct_ik_panel(self, parent):
-        frame = self.create_section_frame(parent, 'CARTESIAN TARGET')
+        frame = self.create_section_frame(parent, 'CARTESIAN TARGET (STAGE 3 TEST 2 IK)')
         self.target_x_entry = self.create_xyz_entry(frame, 'X')
         self.target_y_entry = self.create_xyz_entry(frame, 'Y')
         self.target_z_entry = self.create_xyz_entry(frame, 'Z')
+        self.target_yaw_entry = self.create_xyz_entry(frame, 'Yaw', unit='°')
         
         btn_frame = tk.Frame(frame, bg=self.card_color)
         btn_frame.pack(fill='x', pady=(4, 0))
@@ -1070,10 +1178,11 @@ class RobotGUI(Node):
         self.ik_status_label = tk.Label(frame, text='IK STATUS: IDLE', bg=self.card_color, fg=self.secondary_text, font=self.font_small, anchor='w')
         self.ik_status_label.pack(fill='x')
 
-    def create_xyz_entry(self, parent, label_text):
+    def create_xyz_entry(self, parent, label_text, unit='mm'):
         row = tk.Frame(parent, bg=self.card_color)
         row.pack(fill='x', pady=2)
-        tk.Label(row, text=f'{label_text} (mm)', width=8, anchor='w', font=self.font_main, bg=self.card_color, fg=self.secondary_text).pack(side='left')
+        txt = f'{label_text} ({unit})' if unit else label_text
+        tk.Label(row, text=txt, width=9, anchor='w', font=self.font_main, bg=self.card_color, fg=self.secondary_text).pack(side='left')
         entry, container = self.create_rounded_entry(row, '0.0')
         container.pack(side='right')
         return entry
@@ -1110,7 +1219,7 @@ class RobotGUI(Node):
         self.speed_slider.pack(fill='x')
 
     def create_pick_place_panel(self, parent):
-        frame = self.create_section_frame(parent, 'PICK & PLACE')
+        frame = self.create_section_frame(parent, 'PICK & PLACE (STAGE 3 TEST 2 ENGINE)')
         cols = tk.Frame(frame, bg=self.card_color)
         cols.pack(fill='x')
         left_col = tk.Frame(cols, bg=self.card_color)
@@ -1121,6 +1230,7 @@ class RobotGUI(Node):
         self.pick_x_entry = self.create_xyz_entry(left_col, 'X')
         self.pick_y_entry = self.create_xyz_entry(left_col, 'Y')
         self.pick_z_entry = self.create_xyz_entry(left_col, 'Z')
+        self.pick_yaw_entry = self.create_xyz_entry(left_col, 'Yaw', unit='°')
         
         btn_set_pick = RoundedButton(left_col, text='SET CURRENT', command=self.set_current_pick, bg_parent=self.card_color, bg=self.glass_color, fg=self.primary_blue, hover_bg=self.soft_blue, border_color=self.sky_blue, height=26, font=("Inter", 9, "bold"))
         btn_set_pick.pack(fill='x', pady=(4, 0))
@@ -1129,25 +1239,32 @@ class RobotGUI(Node):
         self.place_x_entry = self.create_xyz_entry(right_col, 'X')
         self.place_y_entry = self.create_xyz_entry(right_col, 'Y')
         self.place_z_entry = self.create_xyz_entry(right_col, 'Z')
+        self.place_yaw_entry = self.create_xyz_entry(right_col, 'Yaw', unit='°')
         
         btn_set_place = RoundedButton(right_col, text='SET CURRENT', command=self.set_current_place, bg_parent=self.card_color, bg=self.glass_color, fg=self.primary_blue, hover_bg=self.soft_blue, border_color=self.sky_blue, height=26, font=("Inter", 9, "bold"))
         btn_set_place.pack(fill='x', pady=(4, 0))
 
         action_frame = tk.Frame(frame, bg=self.card_color)
-        action_frame.pack(fill='x', pady=(6, 0))
+        action_frame.pack(fill='x', pady=(6, 4))
         
-        swap_btn = RoundedButton(action_frame, text='⇅ SWAP', command=self.swap_pick_place, bg_parent=self.card_color, bg=self.glass_color, fg=self.primary_blue, hover_bg=self.soft_blue, border_color=self.sky_blue, height=28)
-        swap_btn.pack(side='left', fill='x', expand=True, padx=(0, 4))
+        swap_btn = RoundedButton(action_frame, text='⇅ SWAP', command=self.swap_pick_place, bg_parent=self.card_color, bg=self.glass_color, fg=self.primary_blue, hover_bg=self.soft_blue, border_color=self.sky_blue, height=32, width=110)
+        swap_btn.pack(side='left', padx=(0, 4))
         
-        clear_pp_btn = RoundedButton(action_frame, text='CLEAR', command=self.clear_pick_and_place, bg_parent=self.card_color, bg=self.glass_color, fg=self.primary_blue, hover_bg=self.soft_blue, border_color=self.sky_blue, height=28)
-        clear_pp_btn.pack(side='right', fill='x', expand=True, padx=(4, 0))
+        clear_pp_btn = RoundedButton(action_frame, text='CLEAR', command=self.clear_pick_and_place, bg_parent=self.card_color, bg=self.glass_color, fg=self.primary_blue, hover_bg=self.soft_blue, border_color=self.sky_blue, height=32, width=110)
+        clear_pp_btn.pack(side='left', padx=(0, 6))
 
-        self.plan_move_button = RoundedButton(frame, text='⬈  PLAN & MOVE', command=self.start_pick_and_place_wrapped, bg_parent=self.card_color, bg=self.primary_blue, hover_bg=self.sky_blue, fg='white', height=36)
-        self.plan_move_button.pack(fill='x', pady=(6, 4))
-        self.task_status_label = tk.Label(frame, text='Task Status: IDLE', bg=self.card_color, fg=self.secondary_text, font=self.font_small, anchor='w')
-        self.task_status_label.pack(fill='x')
-        self.trajectory_status_display = tk.Label(frame, text='IDLE', bg=self.soft_blue, fg=self.primary_blue, font=self.font_bold, pady=4)
-        self.trajectory_status_display.pack(fill='x', pady=(3, 0))
+        self.plan_move_button = RoundedButton(action_frame, text='⬈  PLAN & MOVE', command=self.start_pick_and_place_wrapped, bg_parent=self.card_color, bg=self.primary_blue, hover_bg=self.sky_blue, fg='white', height=34)
+        self.plan_move_button.pack(side='left', fill='x', expand=True)
+
+        status_row = tk.Frame(frame, bg=self.card_color)
+        status_row.pack(fill='x', pady=(2, 0))
+
+        self.task_status_label = tk.Label(status_row, text='Task Status: IDLE', bg=self.card_color, fg=self.secondary_text, font=self.font_small, anchor='w')
+        self.task_status_label.pack(side='left', fill='x', expand=True)
+
+        self.trajectory_status_display = tk.Label(status_row, text='IDLE', bg=self.soft_blue, fg=self.primary_blue, font=self.font_bold, padx=12, pady=2)
+        self.trajectory_status_display.pack(side='right')
+
 
     def create_system_panel(self, parent):
         frame = self.create_section_frame(parent, 'SYSTEM CONTROL')
@@ -1235,8 +1352,14 @@ class RobotGUI(Node):
 
     def clear_cartesian(self):
         self.target_x_entry.delete(0, tk.END)
+        self.target_x_entry.insert(0, "0.0")
         self.target_y_entry.delete(0, tk.END)
+        self.target_y_entry.insert(0, "0.0")
         self.target_z_entry.delete(0, tk.END)
+        self.target_z_entry.insert(0, "0.0")
+        if hasattr(self, 'target_yaw_entry'):
+            self.target_yaw_entry.delete(0, tk.END)
+            self.target_yaw_entry.insert(0, "0.0")
 
     def set_current_pick(self):
         self.pick_x_entry.delete(0, tk.END)
@@ -1248,8 +1371,14 @@ class RobotGUI(Node):
 
     def clear_pick(self):
         self.pick_x_entry.delete(0, tk.END)
+        self.pick_x_entry.insert(0, "0.0")
         self.pick_y_entry.delete(0, tk.END)
+        self.pick_y_entry.insert(0, "0.0")
         self.pick_z_entry.delete(0, tk.END)
+        self.pick_z_entry.insert(0, "0.0")
+        if hasattr(self, 'pick_yaw_entry'):
+            self.pick_yaw_entry.delete(0, tk.END)
+            self.pick_yaw_entry.insert(0, "0.0")
 
     def set_current_place(self):
         self.place_x_entry.delete(0, tk.END)
@@ -1261,8 +1390,14 @@ class RobotGUI(Node):
 
     def clear_place(self):
         self.place_x_entry.delete(0, tk.END)
+        self.place_x_entry.insert(0, "0.0")
         self.place_y_entry.delete(0, tk.END)
+        self.place_y_entry.insert(0, "0.0")
         self.place_z_entry.delete(0, tk.END)
+        self.place_z_entry.insert(0, "0.0")
+        if hasattr(self, 'place_yaw_entry'):
+            self.place_yaw_entry.delete(0, tk.END)
+            self.place_yaw_entry.insert(0, "0.0")
 
     def clear_pick_and_place(self):
         self.clear_pick()
@@ -1271,12 +1406,18 @@ class RobotGUI(Node):
     def swap_pick_place(self):
         px, py, pz = self.pick_x_entry.get(), self.pick_y_entry.get(), self.pick_z_entry.get()
         lx, ly, lz = self.place_x_entry.get(), self.place_y_entry.get(), self.place_z_entry.get()
+        pyaw = self.pick_yaw_entry.get() if hasattr(self, 'pick_yaw_entry') else "0.0"
+        lyaw = self.place_yaw_entry.get() if hasattr(self, 'place_yaw_entry') else "0.0"
         self.pick_x_entry.delete(0, tk.END); self.pick_x_entry.insert(0, lx)
         self.pick_y_entry.delete(0, tk.END); self.pick_y_entry.insert(0, ly)
         self.pick_z_entry.delete(0, tk.END); self.pick_z_entry.insert(0, lz)
+        if hasattr(self, 'pick_yaw_entry'):
+            self.pick_yaw_entry.delete(0, tk.END); self.pick_yaw_entry.insert(0, lyaw)
         self.place_x_entry.delete(0, tk.END); self.place_x_entry.insert(0, px)
         self.place_y_entry.delete(0, tk.END); self.place_y_entry.insert(0, py)
         self.place_z_entry.delete(0, tk.END); self.place_z_entry.insert(0, pz)
+        if hasattr(self, 'place_yaw_entry'):
+            self.place_yaw_entry.delete(0, tk.END); self.place_yaw_entry.insert(0, pyaw)
 
     def solve_ik_and_move_wrapped(self):
         self.tcp_trace_x = []
@@ -2162,86 +2303,79 @@ class RobotGUI(Node):
 
     def solve_ik_and_move(self):
 
-
         if self.control_mode != 'MANUAL':
-
             self.status_label.config(
-
-                text=(
-                    'Direct IK unavailable unless '
-                    'control mode is MANUAL'
-                )
-
+                text='Direct IK unavailable unless control mode is MANUAL'
             )
-
             return
-
 
         xyz = self.read_xyz(
-
             self.target_x_entry,
-
             self.target_y_entry,
-
             self.target_z_entry
-
         )
-
+        yaw = self.read_val(getattr(self, 'target_yaw_entry', None), default=0.0)
 
         if xyz is None:
-
-            self.status_label.config(
-
-                text='ERROR - Invalid Cartesian target'
-
-            )
-
+            self.status_label.config(text='ERROR - Invalid Cartesian target')
             return
 
+        self.robot_state.config(text='SOLVING IK')
+        self.ik_status_label.config(text='IK Status: Solving (Stage 3 Test 2 Engine)...')
+        self.root.update_idletasks()
 
-        msg = Float64MultiArray()
+        q_cur = np.array(self.joint_angles, dtype=float) if hasattr(self, 'joint_angles') and len(self.joint_angles) == self.config.num_joints else None
 
-        msg.data = list(
-
-            xyz
-
+        # 1. Attempt solve_object_pick_ik with object yaw & adaptive tilt
+        res = solve_object_pick_ik(
+            self.robot_id,
+            xyz[0], xyz[1], xyz[2],
+            object_yaw_deg=yaw,
+            config=self.solver_cfg,
+            current_q=q_cur,
+            frame='base'
         )
 
+        solution_q = None
+        solver_desc = ""
 
-        self.direct_ik_pending = True
-
-
-        self.ik_gui_target_pub.publish(
-
-            msg
-
-        )
-
-
-        self.robot_state.config(
-
-            text='SOLVING IK'
-
-        )
-
-
-        self.ik_status_label.config(
-
-            text='IK Status: Solving...'
-
-        )
-
-
-        self.status_label.config(
-
-            text=(
-                f'IK target sent - '
-                f'X={xyz[0]:.1f}, '
-                f'Y={xyz[1]:.1f}, '
-                f'Z={xyz[2]:.1f}'
+        if res.success:
+            solution_q = res.q_deg
+            solver_desc = f"object_pick_ik (Tilt: {res.selected_tilt_deg:.1f}°, Err: {res.position_error:.2f}mm)"
+        else:
+            # 2. Fallback to stage1_ik (XYZ position IK)
+            res_stage1 = solve_stage1_ik(
+                self.robot_id,
+                xyz,
+                self.solver_cfg,
+                current_q_deg=q_cur
             )
+            if res_stage1 is not None:
+                solution_q = res_stage1.q_deg
+                solver_desc = f"stage1_ik fallback (Pos Err: {res_stage1.error_mm:.2f}mm)"
 
-        )
+        if solution_q is not None:
+            cmd_msg = Float64MultiArray()
+            cmd_msg.data = [float(v) for v in solution_q]
+            self.ik_joint_pub.publish(cmd_msg)
+            self.manual_joint_pub.publish(cmd_msg)
+            
+            self.ik_status_label.config(
+                text=f'IK: SUCCESS [{solver_desc}]'
+            )
+            self.status_label.config(
+                text=f'Target [{xyz[0]:.1f}, {xyz[1]:.1f}, {xyz[2]:.1f}] solved via {solver_desc}'
+            )
+            self.robot_state.config(text='● READY')
+        else:
+            reason = res.failure_reason or 'Unreachable target'
+            self.ik_status_label.config(
+                text=f'IK FAILED: {reason[:45]}'
+            )
+            self.status_label.config(
+                text=f'IK FAILED for target {xyz}: {reason}'
+            )
+            self.robot_state.config(text='● ERROR')
 
 
     # ========================================================
@@ -2432,156 +2566,256 @@ class RobotGUI(Node):
 
 
     # ========================================================
-    # PICK AND PLACE
+    # PICK AND PLACE (STAGE 3 TEST 2 DIRECT ENGINE)
     # ========================================================
 
     def start_pick_and_place(self):
 
-
-        if self.control_mode != 'MANUAL':
-
-            self.status_label.config(
-
-                text=(
-                    'Pick & place can only start '
-                    'from MANUAL mode'
-                )
-
-            )
-
+        if self.is_trajectory_running:
+            self.status_label.config(text='Pick & place trajectory is already running!')
             return
 
+        if self.control_mode not in ['MANUAL', 'TRAJECTORY']:
+            self.status_label.config(
+                text='Pick & place can only start from MANUAL mode'
+            )
+            return
 
         pick = self.read_xyz(
-
             self.pick_x_entry,
-
             self.pick_y_entry,
-
             self.pick_z_entry
-
         )
-
-
         place = self.read_xyz(
-
             self.place_x_entry,
-
             self.place_y_entry,
-
             self.place_z_entry
-
         )
-
+        pick_yaw = self.read_val(getattr(self, 'pick_yaw_entry', None), default=0.0)
+        place_yaw = self.read_val(getattr(self, 'place_yaw_entry', None), default=0.0)
 
         if pick is None:
-
-            self.status_label.config(
-
-                text='ERROR - Invalid PICK XYZ'
-
-            )
-
+            self.status_label.config(text='ERROR - Invalid PICK XYZ')
             return
-
-
         if place is None:
-
-            self.status_label.config(
-
-                text='ERROR - Invalid PLACE XYZ'
-
-            )
-
+            self.status_label.config(text='ERROR - Invalid PLACE XYZ')
             return
 
-
-        # ----------------------------------------------------
-        # Publish PICK
-        # ----------------------------------------------------
-
+        # Legacy publishing for external observers or tools
         pick_msg = Float64MultiArray()
-
-        pick_msg.data = list(
-
-            pick
-
-        )
-
-        self.pick_pub.publish(
-
-            pick_msg
-
-        )
-
-
-        # ----------------------------------------------------
-        # Publish PLACE
-        # ----------------------------------------------------
+        pick_msg.data = list(pick)
+        self.pick_pub.publish(pick_msg)
 
         place_msg = Float64MultiArray()
+        place_msg.data = list(place)
+        self.place_pub.publish(place_msg)
 
-        place_msg.data = list(
+        self.abort_trajectory = False
+        self.is_trajectory_running = True
+        self.trajectory_status_display.config(text='PLANNING...', bg=self.soft_blue, fg=self.primary_blue)
+        self.task_status_label.config(text='Task Status: Solving Stage 3 Test 2 kinematics...')
+        self.status_label.config(text=f'Solving Pick {pick} (yaw={pick_yaw}°) & Place {place} (yaw={place_yaw}°)...')
+        self.robot_state.config(text='PLANNING')
 
-            place
-
+        self.trajectory_thread = threading.Thread(
+            target=self._pick_and_place_worker,
+            args=(pick, pick_yaw, place, place_yaw),
+            daemon=True
         )
+        self.trajectory_thread.start()
 
-        self.place_pub.publish(
+    def _send_trajectory_gripper(self, angle):
+        msg = Float64MultiArray()
+        msg.data = [float(angle)]
+        self.trajectory_gripper_pub.publish(msg)
+        self.manual_gripper_pub.publish(msg)
+        state_txt = "CLOSED" if abs(angle - self.gripper_close_angle) < abs(angle - self.gripper_open_angle) else "OPEN"
+        self.root.after(0, lambda: self.gripper_status.config(text=f"{state_txt}  -  {angle:.0f} deg"))
 
-            place_msg
+    def _on_trajectory_error(self, err_msg):
+        self.is_trajectory_running = False
+        mode_req = String()
+        mode_req.data = 'MANUAL'
+        self.control_mode_request_pub.publish(mode_req)
+        self.root.after(0, lambda: self.trajectory_status_display.config(text="ERROR", bg="#FCE8E6", fg=self.error_color))
+        self.root.after(0, lambda: self.task_status_label.config(text="Task Status: ERROR"))
+        self.root.after(0, lambda: self.status_label.config(text=err_msg))
+        self.root.after(0, lambda: self.robot_state.config(text="● ERROR"))
 
-        )
+    def _on_trajectory_abort(self):
+        self.is_trajectory_running = False
+        mode_req = String()
+        mode_req.data = 'HALTED'
+        self.control_mode_request_pub.publish(mode_req)
+        self.root.after(0, lambda: self.trajectory_status_display.config(text="ABORTED", bg="#FCE8E6", fg=self.error_color))
+        self.root.after(0, lambda: self.task_status_label.config(text="Task Status: ABORTED by operator"))
+        self.root.after(0, lambda: self.status_label.config(text="Motion aborted by STOP command"))
+        self.root.after(0, lambda: self.robot_state.config(text="● HALTED"))
 
+    def _pick_and_place_worker(self, pick_xyz, pick_yaw, place_xyz, place_yaw):
+        try:
+            # 1. Starting joint positions
+            start_q = np.array(self.joint_angles, dtype=float).copy() if hasattr(self, 'joint_angles') and len(self.joint_angles) == self.config.num_joints else np.zeros(self.config.num_joints)
 
-        # ----------------------------------------------------
-        # START TRAJECTORY
-        #
-        # trajectory_node owns the transition to TRAJECTORY.
-        # GUI does not directly set TRAJECTORY mode.
-        # ----------------------------------------------------
-
-        command = String()
-
-        command.data = 'START'
-
-
-        self.trajectory_command_pub.publish(
-
-            command
-
-        )
-
-
-        self.task_status_label.config(
-
-            text='Task Status: STARTING...'
-
-        )
-
-
-        self.trajectory_status_display.config(
-
-            text='STARTING'
-
-        )
-
-
-        self.robot_state.config(
-
-            text='STARTING'
-
-        )
-
-
-        self.status_label.config(
-
-            text=(
-                f'Pick & place requested - '
-                f'PICK={pick}  PLACE={place}'
+            # 2. Solve Pick target (solve_object_pick_ik -> fallback stage1_ik)
+            pick_res = solve_object_pick_ik(
+                self.robot_id,
+                pick_xyz[0], pick_xyz[1], pick_xyz[2],
+                object_yaw_deg=pick_yaw,
+                config=self.solver_cfg,
+                current_q=start_q,
+                frame='base'
             )
+            if pick_res.success:
+                pick_q = pick_res.q_deg.copy()
+                pick_desc = f"object_pick_ik (tilt={pick_res.selected_tilt_deg:.1f}°)"
+            else:
+                fallback_pick = solve_stage1_ik(self.robot_id, pick_xyz, self.solver_cfg, current_q_deg=start_q)
+                if fallback_pick is None:
+                    self._on_trajectory_error(f"Pick {pick_xyz} unreachable: {pick_res.failure_reason or 'No IK solution'}")
+                    return
+                pick_q = fallback_pick.q_deg.copy()
+                pick_desc = "stage1_ik (XYZ fallback)"
 
-        )
+            # 3. Solve Place target (solve_object_pick_ik -> fallback stage1_ik)
+            place_res = solve_object_pick_ik(
+                self.robot_id,
+                place_xyz[0], place_xyz[1], place_xyz[2],
+                object_yaw_deg=place_yaw,
+                config=self.solver_cfg,
+                current_q=pick_q,
+                frame='base'
+            )
+            if place_res.success:
+                place_q = place_res.q_deg.copy()
+                place_desc = f"object_pick_ik (tilt={place_res.selected_tilt_deg:.1f}°)"
+            else:
+                fallback_place = solve_stage1_ik(self.robot_id, place_xyz, self.solver_cfg, current_q_deg=pick_q)
+                if fallback_place is None:
+                    self._on_trajectory_error(f"Place {place_xyz} unreachable: {place_res.failure_reason or 'No IK solution'}")
+                    return
+                place_q = fallback_place.q_deg.copy()
+                place_desc = "stage1_ik (XYZ fallback)"
+
+            # 4. Attempt approach / lift waypoints
+            app_h = float(getattr(self.config, 'approach_height', 50.0))
+            pre_pick_xyz = [pick_xyz[0], pick_xyz[1], pick_xyz[2] + app_h]
+            pre_place_xyz = [place_xyz[0], place_xyz[1], place_xyz[2] + app_h]
+
+            pre_pick_res = solve_object_pick_ik(self.robot_id, pre_pick_xyz[0], pre_pick_xyz[1], pre_pick_xyz[2], object_yaw_deg=pick_yaw, config=self.solver_cfg, current_q=start_q, frame='base')
+            pre_pick_q = pre_pick_res.q_deg.copy() if pre_pick_res.success else None
+            if pre_pick_q is None:
+                fb_pp = solve_stage1_ik(self.robot_id, pre_pick_xyz, self.solver_cfg, current_q_deg=start_q)
+                if fb_pp is not None:
+                    pre_pick_q = fb_pp.q_deg.copy()
+
+            pre_place_res = solve_object_pick_ik(self.robot_id, pre_place_xyz[0], pre_place_xyz[1], pre_place_xyz[2], object_yaw_deg=place_yaw, config=self.solver_cfg, current_q=pick_q, frame='base')
+            pre_place_q = pre_place_res.q_deg.copy() if pre_place_res.success else None
+            if pre_place_q is None:
+                fb_pl = solve_stage1_ik(self.robot_id, pre_place_xyz, self.solver_cfg, current_q_deg=pick_q)
+                if fb_pl is not None:
+                    pre_place_q = fb_pl.q_deg.copy()
+
+            home_q = np.array(getattr(self.config, 'home_deg', [0.0]*self.config.num_joints), dtype=float)
+
+            # 5. Build phases of motion
+            steps = self.trajectory_steps
+            dt = max(0.02, 0.08 - (self.speed * 0.006))
+
+            self.root.after(0, lambda: self.status_label.config(
+                text=f"Planned: Pick ({pick_desc}) -> Place ({place_desc})"
+            ))
+
+            # Request TRAJECTORY mode
+            mode_req = String()
+            mode_req.data = 'TRAJECTORY'
+            self.control_mode_request_pub.publish(mode_req)
+            time.sleep(0.1)
+
+            def execute_steps(q_from, q_to, phase_title, num_steps=steps):
+                if self.abort_trajectory:
+                    return False
+                self.root.after(0, lambda: self.task_status_label.config(text=f"Task Status: {phase_title}"))
+                self.root.after(0, lambda: self.trajectory_status_display.config(text="RUNNING", bg=self.soft_blue, fg=self.primary_blue))
+                path = generate_interpolated_path(q_from, q_to, steps=num_steps)
+                for q_step in path:
+                    if self.abort_trajectory:
+                        return False
+                    msg = Float64MultiArray()
+                    msg.data = [float(v) for v in q_step]
+                    self.trajectory_joint_pub.publish(msg)
+                    self.manual_joint_pub.publish(msg)
+                    self.root.after(0, lambda q=q_step: self.set_gui_joint_values(q))
+                    time.sleep(dt)
+                return True
+
+            # Phase 1: Move to Pick (via pre_pick if available)
+            current_exec_q = start_q
+            if pre_pick_q is not None:
+                if not execute_steps(current_exec_q, pre_pick_q, "Approaching Pick (Pre-Pick)"):
+                    self._on_trajectory_abort()
+                    return
+                current_exec_q = pre_pick_q
+
+            if not execute_steps(current_exec_q, pick_q, "Moving down to Pick Target"):
+                self._on_trajectory_abort()
+                return
+            current_exec_q = pick_q
+
+            # Phase 2: Grasp
+            self.root.after(0, lambda: self.task_status_label.config(text="Task Status: Grasping object..."))
+            time.sleep(self.dwell_time_s)
+            self._send_trajectory_gripper(self.gripper_close_angle)
+            time.sleep(self.pick_wait_s)
+
+            # Phase 3: Lift
+            if pre_pick_q is not None:
+                if not execute_steps(current_exec_q, pre_pick_q, "Lifting object"):
+                    self._on_trajectory_abort()
+                    return
+                current_exec_q = pre_pick_q
+
+            # Phase 4: Move to Place (via pre_place if available)
+            if pre_place_q is not None:
+                if not execute_steps(current_exec_q, pre_place_q, "Transferring to Place (Pre-Place)"):
+                    self._on_trajectory_abort()
+                    return
+                current_exec_q = pre_place_q
+
+            if not execute_steps(current_exec_q, place_q, "Lowering to Place Target"):
+                self._on_trajectory_abort()
+                return
+            current_exec_q = place_q
+
+            # Phase 5: Release
+            self.root.after(0, lambda: self.task_status_label.config(text="Task Status: Releasing object..."))
+            time.sleep(self.dwell_time_s)
+            self._send_trajectory_gripper(self.gripper_open_angle)
+            time.sleep(self.place_wait_s)
+
+            # Phase 6: Retract & Return Home
+            if pre_place_q is not None:
+                if not execute_steps(current_exec_q, pre_place_q, "Retracting from Place Target"):
+                    self._on_trajectory_abort()
+                    return
+                current_exec_q = pre_place_q
+
+            if not execute_steps(current_exec_q, home_q, "Returning to Home Position"):
+                self._on_trajectory_abort()
+                return
+
+            # Completed!
+            mode_req.data = 'MANUAL'
+            self.control_mode_request_pub.publish(mode_req)
+
+            self.is_trajectory_running = False
+            self.root.after(0, lambda: self.trajectory_status_display.config(text="COMPLETE", bg=self.soft_blue, fg=self.success_color))
+            self.root.after(0, lambda: self.task_status_label.config(text="Task Status: Pick & Place COMPLETE"))
+            self.root.after(0, lambda: self.robot_state.config(text="● READY"))
+            self.root.after(0, lambda: self.status_label.config(text="Pick & place completed successfully!"))
+
+        except Exception as exc:
+            self._on_trajectory_error(f"Trajectory error: {exc}")
 
 
     # ========================================================
@@ -2806,6 +3040,8 @@ class RobotGUI(Node):
 
     def stop(self):
 
+        self.abort_trajectory = True
+        self.is_trajectory_running = False
 
         # ----------------------------------------------------
         # FORCE HALTED
@@ -2963,6 +3199,15 @@ class RobotGUI(Node):
         except ValueError:
 
             return None
+
+    def read_val(self, entry, default=0.0):
+        if entry is None:
+            return float(default)
+        try:
+            s = entry.get().strip()
+            return float(s) if s else float(default)
+        except Exception:
+            return float(default)
 
 
     # ========================================================

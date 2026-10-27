@@ -1,6 +1,7 @@
 /**
  * rt_AI 3D WEB DIGITAL TWIN — ROBOT MODELS
  * Procedural PBR 3D Articulated Robot Arm & Gripper Builders in Three.js
+ * Standard Robotics Frame: Z is Vertical Height (Up), X is East/Right, Y is North/Forward
  */
 
 class RobotArmModel {
@@ -14,6 +15,7 @@ class RobotArmModel {
     this.config = config;
     this.scene = scene;
     this.dof = config.dof;
+    // Standard 1:1 robotics coordinates [X, Y, Z] (Z is vertical height)
     this.basePos = new THREE.Vector3(...config.base_xyz);
     this.fingerAxis = config.finger_axis || 'x';
 
@@ -79,26 +81,39 @@ class RobotArmModel {
     const baseGroup = new THREE.Group();
     baseGroup.position.copy(this.basePos);
 
-    // Bottom mounting plate
+    // Orient base turntable around Z axis (vertical yaw in degrees)
+    if (this.config.base_rpy_deg && this.config.base_rpy_deg.length === 3) {
+      baseGroup.rotation.z = THREE.MathUtils.degToRad(this.config.base_rpy_deg[2]);
+    }
+
+    // Bottom mounting plate (cylinder oriented along Z)
     const plateGeo = new THREE.CylinderGeometry(70, 75, 12, 32);
     const plateMesh = new THREE.Mesh(plateGeo, this.matJoint);
-    plateMesh.position.y = 6;
+    plateMesh.rotation.x = Math.PI / 2;
+    plateMesh.position.z = 6;
     plateMesh.receiveShadow = true;
     baseGroup.add(plateMesh);
 
-    // Glowing ID ring
+    // Glowing ID ring (torus naturally in XY plane flat on base)
     const ringGeo = new THREE.TorusGeometry(72, 2.5, 16, 48);
     const ringMesh = new THREE.Mesh(ringGeo, this.matAccent);
-    ringMesh.rotation.x = Math.PI / 2;
-    ringMesh.position.y = 12;
+    ringMesh.position.z = 12;
     baseGroup.add(ringMesh);
 
-    // Turntable column
+    // Turntable column (cylinder oriented along Z)
     const colGeo = new THREE.CylinderGeometry(55, 65, 30, 32);
     const colMesh = new THREE.Mesh(colGeo, this.matLink);
-    colMesh.position.y = 25;
+    colMesh.rotation.x = Math.PI / 2;
+    colMesh.position.z = 25;
     colMesh.castShadow = true;
     baseGroup.add(colMesh);
+
+    // Industrial cable conduit port on rear of base perimeter
+    const portGeo = new THREE.BoxGeometry(22, 16, 14);
+    const portMesh = new THREE.Mesh(portGeo, this.matJoint);
+    portMesh.position.set(0, -68, 7);
+    portMesh.castShadow = true;
+    baseGroup.add(portMesh);
 
     this.group.add(baseGroup);
   }
@@ -123,7 +138,7 @@ class RobotArmModel {
 
     // Build link cylinders connecting consecutive frames
     for (let i = 0; i < numFrames - 1; i++) {
-      // Cylindrical link segment
+      // Cylindrical link segment (default along Y, dynamically oriented in 3D)
       const linkGeo = new THREE.CylinderGeometry(10, 10, 1, 20);
       const linkMesh = new THREE.Mesh(linkGeo, this.matLink);
       linkMesh.castShadow = true;
@@ -139,28 +154,30 @@ class RobotArmModel {
     this.gripperGroup = new THREE.Group();
     this.gripperGroup.name = `gripper_${this.id}`;
 
-    // Gripper palm base
-    const palmGeo = new THREE.BoxGeometry(36, 16, 24);
+    // Gripper palm base (mounted to wrist tool flange along -Z)
+    const palmGeo = new THREE.BoxGeometry(36, 24, 16);
     const palmMesh = new THREE.Mesh(palmGeo, this.matGripper);
+    palmMesh.position.z = -8;
     palmMesh.castShadow = true;
     this.gripperGroup.add(palmMesh);
 
-    // Finger jaws (left and right)
-    const fingerGeo = new THREE.BoxGeometry(6, 32, 12);
+    // Finger jaws (left and right, centered symmetrically along X, extending along tool approach axis +Z)
+    const fingerGeo = new THREE.BoxGeometry(6, 12, 28);
 
     this.fingerLeft = new THREE.Mesh(fingerGeo, this.matAccent);
-    this.fingerLeft.position.set(-14, 20, 0);
+    this.fingerLeft.position.set(-14, 0, 6);
     this.fingerLeft.castShadow = true;
     this.gripperGroup.add(this.fingerLeft);
 
     this.fingerRight = new THREE.Mesh(fingerGeo, this.matAccent);
-    this.fingerRight.position.set(14, 20, 0);
+    this.fingerRight.position.set(14, 0, 6);
     this.fingerRight.castShadow = true;
     this.gripperGroup.add(this.fingerRight);
 
-    // TCP RGB Coordinate Axes Helper
+    // TCP RGB Coordinate Axes Helper located at tool center point (0, 0, 0)
+    // Red = X (finger axis), Green = Y (thickness), Blue = Z (approach direction)
     this.tcpAxesHelper = new THREE.AxesHelper(35);
-    this.tcpAxesHelper.position.set(0, 36, 0);
+    this.tcpAxesHelper.position.set(0, 0, 0);
     this.gripperGroup.add(this.tcpAxesHelper);
 
     this.group.add(this.gripperGroup);
@@ -175,9 +192,8 @@ class RobotArmModel {
   updatePose(framesWorld, tcpR = null, gripperState = 'open') {
     if (!framesWorld || framesWorld.length === 0) return;
 
-    // In Three.js, Y is UP (Z in robotics is ceiling/height).
-    // Mapping: Three.X = World.X, Three.Y = World.Z, Three.Z = -World.Y
-    const toThreeVec = (pt) => new THREE.Vector3(pt[0], pt[2], -pt[1]);
+    // Direct 1:1 robotics coordinate matching: Three.js [X, Y, Z] = Robotics [X, Y, Z]
+    const toThreeVec = (pt) => new THREE.Vector3(pt[0], pt[1], pt[2]);
 
     const numPoints = framesWorld.length;
 
@@ -185,6 +201,15 @@ class RobotArmModel {
     for (let i = 0; i < numPoints && i < this.jointHubs.length; i++) {
       const v = toThreeVec(framesWorld[i]);
       this.jointHubs[i].position.copy(v);
+
+      // Hide coincident joint hubs (distance < 1.0 mm) and TCP joint hub to prevent z-fighting and palm overlap
+      if (i === numPoints - 1 && this.gripperGroup) {
+        this.jointHubs[i].visible = false;
+      } else if (i > 0 && v.distanceTo(toThreeVec(framesWorld[i - 1])) < 1.0) {
+        this.jointHubs[i].visible = false;
+      } else {
+        this.jointHubs[i].visible = true;
+      }
     }
 
     // Update link cylinders
@@ -217,26 +242,24 @@ class RobotArmModel {
       const prevPos = toThreeVec(framesWorld[numPoints - 2]);
       this.gripperGroup.position.copy(tcpPos);
 
-      // Orientation from TCP rotation matrix or approach direction
+      // Direct 1:1 orientation from forward kinematics rotation matrix
       if (tcpR && tcpR.length === 3) {
-        // Construct 3x3 matrix in Three.js coordinate system
         const m = new THREE.Matrix4();
-        // Robotics World to Three.js mapping:
-        // [X_three, Y_three, Z_three] = [X_rob, Z_rob, -Y_rob]
         const r0 = tcpR[0], r1 = tcpR[1], r2 = tcpR[2];
+        // Pure unswapped SO(3) rotation matrix matching robotics world frame
         m.set(
-          r0[0],  r0[2], -r0[1], 0,
-          r2[0],  r2[2], -r2[1], 0,
-         -r1[0], -r1[2],  r1[1], 0,
-          0,      0,      0,     1
+          r0[0], r0[1], r0[2], 0,
+          r1[0], r1[1], r1[2], 0,
+          r2[0], r2[1], r2[2], 0,
+          0,     0,     0,     1
         );
         this.gripperGroup.quaternion.setFromRotationMatrix(m);
       } else {
         const approachDir = new THREE.Vector3().subVectors(tcpPos, prevPos).normalize();
-        this.gripperGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), approachDir);
+        this.gripperGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), approachDir);
       }
 
-      // Animate gripper finger jaws open / close
+      // Animate gripper finger jaws open / close along local X
       const isClosed = gripperState === 'close' || (typeof gripperState === 'number' && gripperState > 10);
       const targetOffset = isClosed ? 5 : 15;
       this.fingerLeft.position.x = -targetOffset;

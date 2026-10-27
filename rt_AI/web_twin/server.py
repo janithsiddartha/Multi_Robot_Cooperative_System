@@ -180,10 +180,11 @@ class WebTwinEngine:
                 [round(float(x), 2) for x in (cfg.world_base_R @ p + cfg.world_base_xyz)]
                 for p in pos_base
             ]
-            tcp_base, _ = fk(q_rad, cfg)
+            tcp_base, R_flange = fk(q_rad, cfg)
             tcp_world = [
                 round(float(x), 2) for x in (cfg.world_base_R @ tcp_base + cfg.world_base_xyz)
             ]
+            R_tcp_world = cfg.world_base_R @ R_flange[:3, :3]
 
             # Build DH parameters table for single-robot inspector (testGUI 1, 2, 3)
             dh_table = []
@@ -209,6 +210,9 @@ class WebTwinEngine:
                 "base_rpy_deg": self.handover_cfg["robots"][rid]["world_base_rpy_deg"],
                 "frames_world": pos_world,
                 "tcp_world": tcp_world,
+                "tcp_R": [
+                    [round(float(v), 4) for v in row] for row in R_tcp_world
+                ],
                 "finger_axis": cfg.gripper_finger_axis,
                 "open_angle": float(cfg.gripper_open),
                 "close_angle": float(cfg.gripper_close),
@@ -382,19 +386,41 @@ class WebTwinEngine:
     def solve_single_ik(self, robot_id: str, target_xyz_world: List[float]) -> dict:
         """Direct XYZ Inverse Kinematics solver for a single robot (matching testGUI 1, 2, 3)."""
         if robot_id not in self.robots:
-            return {"success": False, "error": f"Unknown robot {robot_id}"}
+            return {
+                "cmd": "solve_single_ik_result",
+                "success": False,
+                "robot_id": robot_id,
+                "target_xyz": target_xyz_world,
+                "error": f"Unknown robot {robot_id}",
+            }
         try:
             cfg = self.robots[robot_id]
+            target_world = np.array(target_xyz_world, dtype=float)
+            current_q_deg = np.array(self.current_q[robot_id], dtype=float)
+
+            # Fast solve with 6 random starts (< 200ms)
             res = solve_stage1_ik(
                 robot_id=robot_id,
-                target_xyz_world=np.array(target_xyz_world, dtype=float),
+                target_xyz_world=target_world,
                 config=cfg,
-                current_q_deg=np.array(self.current_q[robot_id], dtype=float),
+                current_q_deg=current_q_deg,
+                num_random_starts=6,
             )
             if res is None:
+                # Target is outside reach envelope or has high error
+                from robot_control.handover.stage1_ik import world_to_base
+                from robot_control.kinematics.ik_solver import ik_single
+                target_base = world_to_base(target_world, cfg)
+                current_q_rad = np.deg2rad(current_q_deg)
+                single_res = ik_single(target_base, cfg, q_init=current_q_rad, max_iterations=100)
+                err_mm = float(single_res.get("error", 999.0))
                 return {
+                    "cmd": "solve_single_ik_result",
                     "success": False,
-                    "error": f"Target [{target_xyz_world[0]}, {target_xyz_world[1]}, {target_xyz_world[2]}] mm is outside {robot_id.upper()} reach envelope.",
+                    "robot_id": robot_id,
+                    "target_xyz": target_xyz_world,
+                    "error_mm": round(err_mm, 3),
+                    "error": f"IK FAILED | High error = {err_mm:.3f} mm (Target [{target_xyz_world[0]}, {target_xyz_world[1]}, {target_xyz_world[2]}] mm unreachable by {robot_id.upper()})",
                 }
 
             self.current_q[robot_id] = [round(float(v), 2) for v in res.q_deg]
@@ -416,8 +442,8 @@ class WebTwinEngine:
                         best_a, best_b = pa, pb
 
             return {
-                "success": True,
                 "cmd": "solve_single_ik_result",
+                "success": True,
                 "robot_id": robot_id,
                 "target_xyz": target_xyz_world,
                 "error_mm": round(float(res.error_mm), 3),
@@ -431,7 +457,13 @@ class WebTwinEngine:
                 },
             }
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return {
+                "cmd": "solve_single_ik_result",
+                "success": False,
+                "robot_id": robot_id,
+                "target_xyz": target_xyz_world,
+                "error": f"IK Solver error: {str(e)}",
+            }
 
     def check_reachability(self, target_xyz: List[float], target_yaw: float = 0.0) -> dict:
         """Query reachability across all robots using Stage 2.5 object IK and fallback."""
@@ -557,28 +589,32 @@ class WebTwinEngine:
                 return chosen_place_robot
             return choices[0]
 
-        plan, _, _ = build_stage3_test2_plan(
-            pick_xyz=pick_xyz,
-            place_xyz=place_xyz,
-            robots=self.robots,
-            handover_cfg=self.handover_cfg,
-            chooser=chooser,
-            pick_yaw_deg=pick_yaw,
-            place_yaw_deg=place_yaw,
-            use_auto_handover=True,
-            cache_filepath=self.cache_filepath,
-            config_fingerprint=self.target_cache_fp,
-            test_poses=self.auto_poses,
-        )
+        try:
+            plan, _, _ = build_stage3_test2_plan(
+                pick_xyz=pick_xyz,
+                place_xyz=place_xyz,
+                robots=self.robots,
+                handover_cfg=self.handover_cfg,
+                chooser=chooser,
+                pick_yaw_deg=pick_yaw,
+                place_yaw_deg=place_yaw,
+                use_auto_handover=True,
+                cache_filepath=self.cache_filepath,
+                config_fingerprint=self.target_cache_fp,
+                test_poses=self.auto_poses,
+            )
 
-        steps_per_phase = 16
-        safe_dist = 45.0
-        traj_result = plan_stage3_test2_paths(
-            plan=plan,
-            robots=self.robots,
-            safe_distance=safe_dist,
-            steps=steps_per_phase,
-        )
+            steps_per_phase = 16
+            safe_dist = 45.0
+            traj_result = plan_stage3_test2_paths(
+                plan=plan,
+                robots=self.robots,
+                safe_distance=safe_dist,
+                steps=steps_per_phase,
+            )
+        except Exception as exc:
+            print(f"[WebTwin] Planning error: {exc}")
+            return {"success": False, "error": str(exc)}
 
         # Discretize and package all trajectory steps for smooth 60 FPS animation
         steps_payload = []
@@ -727,6 +763,14 @@ class WebTwinEngine:
                 "handover_clearance_mm": round(float(plan.auto_handover_info.handover_clearance_mm), 1)
                 if plan.auto_handover_info else None,
             },
+            "planning_logs": [
+                "=== STAGE 3 TEST 2 TASK PLAN CREATED ===",
+                f"Pick Target: [{pick_xyz[0]}, {pick_xyz[1]}, {pick_xyz[2]}] mm (yaw: {pick_yaw}°) -> {pick_r.upper()} ({plan.pick.solver_type}, tilt: {round(float(plan.pick.approach_tilt_deg or 0.0), 1)}°)",
+                f"Place Target: [{place_xyz[0]}, {place_xyz[1]}, {place_xyz[2]}] mm (yaw: {place_yaw}°) -> {place_r.upper()} ({plan.place.solver_type}, tilt: {round(float(plan.place.approach_tilt_deg or 0.0), 1)}°)",
+                (f"Handover Strategy: AUTO {pick_r.upper()} ➔ {place_r.upper()} at {[round(float(x), 1) for x in plan.auto_handover_info.handover_position_world]} mm (Top-of-WS)" if plan.needs_handover and plan.auto_handover_info else ("Handover Strategy: DIRECT (Same Robot - No Handover)" if not plan.needs_handover else "Handover Strategy: MANUAL OVERRIDE")),
+                f"Min Body Clearance: {round(float(traj_result.min_overall_clearance_mm), 1)} mm (Gate: {safe_dist:.1f} mm) -> {'✓ SAFE' if traj_result.all_phases_safe else '⚠️ WARNING: NEAR LIMIT'}",
+                f"Trajectory: 9 phases discretized into {len(steps_payload)} synchronized steps ready for simulation.",
+            ],
             "steps": steps_payload,
         }
 
@@ -863,6 +907,31 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
                             },
                         }))
 
+                elif cmd == "home_arm":
+                    robot_id = data.get("robot_id", "robot1")
+                    if robot_id in twin_engine.robots:
+                        twin_engine.current_q[robot_id] = [float(v) for v in twin_engine.robots[robot_id].home_deg]
+                        frame_data = twin_engine.compute_frames(twin_engine.current_q)
+                        q1 = np.array(twin_engine.current_q["robot1"])
+                        q2 = np.array(twin_engine.current_q["robot2"])
+                        dist_mm, pt_a, pt_b = compute_laser_endpoints(
+                            q1, twin_engine.robots["robot1"], q2, twin_engine.robots["robot2"]
+                        )
+                        res = {
+                            "cmd": "manual_jog_result",
+                            "robot_id": robot_id,
+                            "joint_state": twin_engine.current_q,
+                            "frames": frame_data,
+                            "clearance": {
+                                "min_distance_mm": round(dist_mm, 2),
+                                "endpoint_a": pt_a,
+                                "endpoint_b": pt_b,
+                                "pair": "robot1_robot2",
+                            },
+                        }
+                        if not ws.closed:
+                            await ws.send_str(json.dumps(res))
+
             except Exception as e:
                 traceback.print_exc()
                 if not ws.closed:
@@ -875,6 +944,15 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
+@web.middleware
+async def no_cache_middleware(request: web.Request, handler):
+    resp = await handler(request)
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
+
 async def handle_index(request: web.Request) -> web.Response:
     index_file = os.path.join(SCRIPT_DIR, "static", "index.html")
     with open(index_file, "r", encoding="utf-8") as f:
@@ -882,7 +960,7 @@ async def handle_index(request: web.Request) -> web.Response:
 
 
 def create_app() -> web.Application:
-    app = web.Application()
+    app = web.Application(middlewares=[no_cache_middleware])
     app.router.add_get("/", handle_index)
     app.router.add_get("/ws", handle_websocket)
     static_dir = os.path.join(SCRIPT_DIR, "static")

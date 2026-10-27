@@ -1,7 +1,13 @@
 /**
  * rt_AI 3D WEB DIGITAL TWIN — THREE.JS SCENE & 3D INTERACTION
  * Scene setup, Studio Lights, Interactive Transform Gizmos, Camera Presets & Workpiece
+ * Standard Robotics Frame: Z is Vertical Height (Up), X is East/Right, Y is North/Forward
  */
+
+// Configure Three.js to default to Z as the UP axis (matching ROS & robotics YAML)
+if (typeof THREE !== 'undefined' && THREE.Object3D && THREE.Object3D.DefaultUp) {
+  THREE.Object3D.DefaultUp.set(0, 0, 1);
+}
 
 class WebTwinScene {
   /**
@@ -37,8 +43,9 @@ class WebTwinScene {
     const h = this.canvas.clientHeight;
 
     this.camera = new THREE.PerspectiveCamera(45, w / h, 10, 5000);
-    // Initial isometric view (Robotics Z=up is Three.js Y=up)
-    this.camera.position.set(0, 700, 750);
+    this.camera.up.set(0, 0, 1); // Z is UP
+    // Initial isometric view (looking from South towards workspace center)
+    this.camera.position.set(0, -750, 700);
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
@@ -53,10 +60,10 @@ class WebTwinScene {
     this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;
-    this.controls.maxPolarAngle = Math.PI / 2 + 0.05; // Don't flip below floor
+    this.controls.maxPolarAngle = Math.PI / 2 + 0.05; // Don't flip below table surface
     this.controls.minDistance = 100;
     this.controls.maxDistance = 2500;
-    this.controls.target.set(0, 150, 0);
+    this.controls.target.set(0, 0, 150);
   }
 
   _initLights() {
@@ -64,20 +71,20 @@ class WebTwinScene {
     const ambLight = new THREE.AmbientLight(0xFFFFFF, 2.0);
     this.scene.add(ambLight);
 
-    // 2. Sky-to-Ground natural hemisphere fill
+    // 2. Sky-to-Ground natural hemisphere fill (Sky at +Z, Ground at -Z)
     const hemiLight = new THREE.HemisphereLight(0xF8FAFC, 0x475569, 1.8);
     this.scene.add(hemiLight);
 
-    // 3. Overhead Direct Downward Workspace Floodlight (at Y=850 directly over the 3 robots)
+    // 3. Overhead Direct Downward Workspace Floodlight (at Z=850 directly over the 3 robots)
     const overheadFlood = new THREE.DirectionalLight(0xFFFFFF, 2.2);
-    overheadFlood.position.set(0, 850, 0);
+    overheadFlood.position.set(0, 0, 850);
     overheadFlood.target.position.set(0, 0, 0);
     this.scene.add(overheadFlood);
     this.scene.add(overheadFlood.target);
 
     // 4. Main studio key light (Overhead Angle)
     const dirLight = new THREE.DirectionalLight(0xFFFFFF, 2.6);
-    dirLight.position.set(500, 1000, 600);
+    dirLight.position.set(500, -600, 1000);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
@@ -92,35 +99,35 @@ class WebTwinScene {
 
     // 5. Fill Light 1 (Back-Left Fill)
     const fillLight1 = new THREE.DirectionalLight(0xF1F5F9, 1.8);
-    fillLight1.position.set(-700, 700, -500);
+    fillLight1.position.set(-700, -500, 700);
     this.scene.add(fillLight1);
 
     // 6. Fill Light 2 (Back-Right Fill)
     const fillLight2 = new THREE.DirectionalLight(0xF1F5F9, 1.6);
-    fillLight2.position.set(700, 700, -400);
+    fillLight2.position.set(700, -400, 700);
     this.scene.add(fillLight2);
 
     // 7. Fill Light 3 (Front Low Fill for underside arm clarity)
     const fillLight3 = new THREE.DirectionalLight(0xE2E8F0, 1.5);
-    fillLight3.position.set(0, 350, 800);
+    fillLight3.position.set(0, -800, 350);
     this.scene.add(fillLight3);
 
-    // 8. Accent Point Lights at Robot Bases (amplified radius and power)
+    // 8. Accent Point Lights at Robot Bases [X, Y, Z] matching robotics coordinates
     const r1Point = new THREE.PointLight(0x00F0FF, 3.0, 750);
-    r1Point.position.set(-250, 70, 0);
+    r1Point.position.set(-250, 0, 70);
     this.scene.add(r1Point);
 
     const r2Point = new THREE.PointLight(0xBD00FF, 3.0, 750);
-    r2Point.position.set(250, 70, 0);
+    r2Point.position.set(250, 0, 70);
     this.scene.add(r2Point);
 
     const r3Point = new THREE.PointLight(0xFFB800, 3.0, 750);
-    r3Point.position.set(0, 70, -250);
+    r3Point.position.set(0, 250, 70);
     this.scene.add(r3Point);
   }
 
   _initWorkcellFloor() {
-    // 1. Expansive Cleanroom Laboratory Floor Disc (radius 2200mm, prevents black void)
+    // 1. Expansive Cleanroom Laboratory Floor Disc (radius 2200mm, horizontal in XY plane)
     const floorGeo = new THREE.CylinderGeometry(2200, 2200, 10, 64);
     const floorMat = new THREE.MeshStandardMaterial({
       color: 0x111827,
@@ -128,16 +135,18 @@ class WebTwinScene {
       roughness: 0.8,
     });
     const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.position.y = -12.5;
+    floor.rotation.x = Math.PI / 2;
+    floor.position.set(0, 0, -12.5);
     floor.receiveShadow = true;
     this.scene.add(floor);
 
-    // Laboratory Outer Grid
+    // Laboratory Outer Grid in XY plane
     const outerGrid = new THREE.GridHelper(3000, 60, 0x38BDF8, 0x334155);
-    outerGrid.position.y = -7.0;
+    outerGrid.rotation.x = Math.PI / 2;
+    outerGrid.position.set(0, 0, -7.0);
     this.scene.add(outerGrid);
 
-    // 2. Shared Workcell Table Mesh (Brushed Titanium Finish)
+    // 2. Shared Workcell Table Mesh (Brushed Titanium Finish, horizontal in XY plane)
     const tableGeo = new THREE.CylinderGeometry(600, 600, 15, 64);
     const tableMat = new THREE.MeshStandardMaterial({
       color: 0x334155,
@@ -145,11 +154,12 @@ class WebTwinScene {
       roughness: 0.22,
     });
     const table = new THREE.Mesh(tableGeo, tableMat);
-    table.position.y = -7.5;
+    table.rotation.x = Math.PI / 2;
+    table.position.set(0, 0, -7.5);
     table.receiveShadow = true;
     this.scene.add(table);
 
-    // Luminous Cyan Table Rim Accent Ring
+    // Luminous Cyan Table Rim Accent Ring (naturally lies flat in XY plane)
     const rimGeo = new THREE.TorusGeometry(600, 3.5, 16, 100);
     const rimMat = new THREE.MeshStandardMaterial({
       color: 0x00F0FF,
@@ -157,29 +167,17 @@ class WebTwinScene {
       emissiveIntensity: 0.75,
     });
     const rimMesh = new THREE.Mesh(rimGeo, rimMat);
-    rimMesh.rotation.x = Math.PI / 2;
+    rimMesh.position.set(0, 0, 0);
     this.scene.add(rimMesh);
 
-    // High-Contrast Metric Grid on Table Surface (Cyan Center & Bright Slate Lines)
+    // High-Contrast Metric Grid on Table Surface
     const grid = new THREE.GridHelper(1000, 40, 0x00F0FF, 0x64748B);
-    grid.position.y = 0.5;
+    grid.rotation.x = Math.PI / 2;
+    grid.position.set(0, 0, 0.5);
     this.scene.add(grid);
 
-    // 3. Overhead Circular LED Light Ring (Suspended at Y=750mm above workspace)
-    const ledRingGeo = new THREE.TorusGeometry(420, 5, 16, 80);
-    const ledRingMat = new THREE.MeshStandardMaterial({
-      color: 0xFFFFFF,
-      emissive: 0xFFFFFF,
-      emissiveIntensity: 1.5,
-      metalness: 0.1,
-      roughness: 0.1,
-    });
-    const ledRing = new THREE.Mesh(ledRingGeo, ledRingMat);
-    ledRing.position.set(0, 750, 0);
-    ledRing.rotation.x = Math.PI / 2;
-    this.scene.add(ledRing);
 
-    // Handover Zone Floating Ring (Z = 362.5 mm -> Three.js Y = 362.5)
+    // Handover Zone Floating Ring (Z = 362.5 mm directly)
     const hoRingGeo = new THREE.TorusGeometry(80, 2.5, 16, 64);
     const hoRingMat = new THREE.MeshBasicMaterial({
       color: 0x00FF9D,
@@ -187,14 +185,13 @@ class WebTwinScene {
       opacity: 0.65,
     });
     this.hoRing = new THREE.Mesh(hoRingGeo, hoRingMat);
-    this.hoRing.rotation.x = Math.PI / 2;
-    this.hoRing.position.set(37.5, 362.5, 37.5);
+    this.hoRing.position.set(37.5, 37.5, 362.5);
     this.scene.add(this.hoRing);
   }
 
   _initTargetsAndGizmos() {
     // ─────────────────────────────────────────────────────────────
-    // 1. Pick Target Marker & Transform Gizmo (Cyan)
+    // 1. Pick Target Marker & Transform Gizmo (Cyan) [X, Y, Z]
     // ─────────────────────────────────────────────────────────────
     const pickGeo = new THREE.OctahedronGeometry(18, 0);
     const pickMat = new THREE.MeshStandardMaterial({
@@ -208,8 +205,8 @@ class WebTwinScene {
     });
     this.pickMarker = new THREE.Mesh(pickGeo, pickMat);
     this.pickMarker.name = 'pick_target_marker';
-    // Three.js [X, Z, -Y] = Robotics [-200, 150, 150] -> [-200, 150, -150]
-    this.pickMarker.position.set(-200, 150, -150);
+    // Direct 1:1 coordinates: [-200, 150, 150]
+    this.pickMarker.position.set(-200, 150, 150);
     this.scene.add(this.pickMarker);
 
     this.pickGizmo = new THREE.TransformControls(this.camera, this.renderer.domElement);
@@ -218,7 +215,7 @@ class WebTwinScene {
     this.scene.add(this.pickGizmo);
 
     // ─────────────────────────────────────────────────────────────
-    // 2. Place Target Marker & Transform Gizmo (Violet)
+    // 2. Place Target Marker & Transform Gizmo (Violet) [X, Y, Z]
     // ─────────────────────────────────────────────────────────────
     const placeGeo = new THREE.OctahedronGeometry(18, 0);
     const placeMat = new THREE.MeshStandardMaterial({
@@ -232,8 +229,8 @@ class WebTwinScene {
     });
     this.placeMarker = new THREE.Mesh(placeGeo, placeMat);
     this.placeMarker.name = 'place_target_marker';
-    // Three.js [X, Z, -Y] = Robotics [150, 100, 180] -> [150, 180, -100]
-    this.placeMarker.position.set(150, 180, -100);
+    // Direct 1:1 coordinates: [150, 100, 180]
+    this.placeMarker.position.set(150, 100, 180);
     this.scene.add(this.placeMarker);
 
     this.placeGizmo = new THREE.TransformControls(this.camera, this.renderer.domElement);
@@ -249,7 +246,7 @@ class WebTwinScene {
       gizmo.addEventListener('change', () => {
         if (this.onTargetMovedCallback) {
           const robCoord = this.toRoboticsCoord(gizmo.object.position);
-          const yawDeg = THREE.MathUtils.radToDeg(gizmo.object.rotation.y);
+          const yawDeg = THREE.MathUtils.radToDeg(gizmo.object.rotation.z);
           this.onTargetMovedCallback(type, robCoord, yawDeg);
         }
       });
@@ -271,6 +268,7 @@ class WebTwinScene {
       roughness: 0.2,
     });
     const cylMesh = new THREE.Mesh(cylGeo, cylMat);
+    cylMesh.rotation.x = Math.PI / 2; // Standing vertical along Z axis
     cylMesh.castShadow = true;
     this.workpiece.add(cylMesh);
 
@@ -282,11 +280,11 @@ class WebTwinScene {
       roughness: 0.25,
     });
     const bandMesh = new THREE.Mesh(bandGeo, bandMat);
+    bandMesh.rotation.x = Math.PI / 2;
     this.workpiece.add(bandMesh);
 
-    // Initial position on table at Pick target
-    const initRob = [-200, 150, 19];
-    this.workpiece.position.set(initRob[0], initRob[2], -initRob[1]);
+    // Initial position on table at Pick target: [-200, 150, 19]
+    this.workpiece.position.set(-200, 150, 19);
     this.scene.add(this.workpiece);
   }
 
@@ -299,20 +297,20 @@ class WebTwinScene {
   }
 
   /**
-   * Robotics [X, Y, Z] -> Three.js [X, Z, -Y]
+   * Robotics [X, Y, Z] -> Three.js [X, Y, Z] (Direct 1:1)
    */
   toThreeCoord(rob) {
-    return new THREE.Vector3(rob[0], rob[2], -rob[1]);
+    return new THREE.Vector3(...rob);
   }
 
   /**
-   * Three.js [X, Y, Z] -> Robotics [X, -Z, Y]
+   * Three.js [X, Y, Z] -> Robotics [X, Y, Z] (Direct 1:1)
    */
   toRoboticsCoord(threePos) {
     return [
       Math.round(threePos.x * 10) / 10,
-      Math.round(-threePos.z * 10) / 10,
       Math.round(threePos.y * 10) / 10,
+      Math.round(threePos.z * 10) / 10,
     ];
   }
 
@@ -321,8 +319,8 @@ class WebTwinScene {
    */
   setPickTarget(xyz, yawDeg = 0) {
     if (this.pickMarker) {
-      this.pickMarker.position.copy(this.toThreeCoord(xyz));
-      this.pickMarker.rotation.y = THREE.MathUtils.degToRad(-yawDeg);
+      this.pickMarker.position.set(xyz[0], xyz[1], xyz[2]);
+      this.pickMarker.rotation.z = THREE.MathUtils.degToRad(yawDeg);
     }
   }
 
@@ -331,8 +329,8 @@ class WebTwinScene {
    */
   setPlaceTarget(xyz, yawDeg = 0) {
     if (this.placeMarker) {
-      this.placeMarker.position.copy(this.toThreeCoord(xyz));
-      this.placeMarker.rotation.y = THREE.MathUtils.degToRad(-yawDeg);
+      this.placeMarker.position.set(xyz[0], xyz[1], xyz[2]);
+      this.placeMarker.rotation.z = THREE.MathUtils.degToRad(yawDeg);
     }
   }
 
@@ -341,7 +339,7 @@ class WebTwinScene {
    */
   setHandoverPosition(xyz) {
     if (this.hoRing) {
-      this.hoRing.position.copy(this.toThreeCoord(xyz));
+      this.hoRing.position.set(xyz[0], xyz[1], xyz[2]);
     }
   }
 
@@ -350,46 +348,53 @@ class WebTwinScene {
    */
   updateWorkpiece(wpData) {
     if (!this.workpiece || !wpData) return;
-    const pos = this.toThreeCoord(wpData.position);
-    this.workpiece.position.copy(pos);
+    this.workpiece.position.set(wpData.position[0], wpData.position[1], wpData.position[2]);
     if (wpData.rotation) {
-      this.workpiece.rotation.y = THREE.MathUtils.degToRad(-wpData.rotation[2]);
+      this.workpiece.rotation.z = THREE.MathUtils.degToRad(wpData.rotation[2]);
+    }
+  }
+
+  setWorkpiecePosition(posRob, rotEuler = [0, 0, 0]) {
+    if (!this.workpiece || !posRob) return;
+    this.workpiece.position.set(posRob[0], posRob[1], posRob[2]);
+    if (rotEuler) {
+      this.workpiece.rotation.z = THREE.MathUtils.degToRad(rotEuler[2]);
     }
   }
 
   /**
-   * Switch Camera to Preset Angle
+   * Switch Camera to Preset Angle in Z-up system
    * @param {string} presetName - 'isometric' | 'top' | 'front' | 'handover' | 'r1' | 'r2' | 'r3'
    */
   setCameraPreset(presetName) {
     switch (presetName) {
       case 'isometric':
-        this.camera.position.set(0, 700, 750);
-        this.controls.target.set(0, 150, 0);
+        this.camera.position.set(0, -750, 700);
+        this.controls.target.set(0, 0, 150);
         break;
       case 'top':
-        this.camera.position.set(0, 1100, 1);
+        this.camera.position.set(0, -0.001, 1200);
         this.controls.target.set(0, 0, 0);
         break;
       case 'front':
-        this.camera.position.set(0, 300, 950);
-        this.controls.target.set(0, 180, 0);
+        this.camera.position.set(0, -950, 300);
+        this.controls.target.set(0, 0, 180);
         break;
       case 'handover':
-        this.camera.position.set(0, 520, 320);
-        this.controls.target.set(37.5, 362.5, 37.5);
+        this.camera.position.set(37.5, -300, 520);
+        this.controls.target.set(37.5, 37.5, 362.5);
         break;
       case 'r1':
-        this.camera.position.set(-550, 450, 250);
-        this.controls.target.set(-250, 200, 0);
+        this.camera.position.set(-550, -250, 450);
+        this.controls.target.set(-250, 0, 200);
         break;
       case 'r2':
-        this.camera.position.set(550, 450, 250);
-        this.controls.target.set(250, 200, 0);
+        this.camera.position.set(550, -250, 450);
+        this.controls.target.set(250, 0, 200);
         break;
       case 'r3':
-        this.camera.position.set(0, 450, -550);
-        this.controls.target.set(0, 200, -250);
+        this.camera.position.set(0, 550, 450);
+        this.controls.target.set(0, 250, 200);
         break;
     }
     this.controls.update();

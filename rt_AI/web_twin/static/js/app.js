@@ -94,6 +94,7 @@ class WebTwinApp {
       jogTcpWorld: document.getElementById('jog-tcp-world'),
 
       // Timeline & Controls
+      btnHomeAll: document.getElementById('btn-home'),
       btnPlayPause: document.getElementById('btn-play-pause'),
       btnReset: document.getElementById('btn-reset'),
       btnExecute: document.getElementById('btn-execute'),
@@ -300,6 +301,14 @@ class WebTwinApp {
       this.dom.btnPlan.addEventListener('click', () => this.requestPlan({ autoSimulate: false, autoExecute: false }));
     }
 
+    // Top Right Home All Button
+    if (this.dom.btnHomeAll) {
+      this.dom.btnHomeAll.addEventListener('click', () => {
+        this.log('[System] Returning all physical robots to mechanical HOME...', 'info');
+        this.send({ cmd: 'home_all' });
+      });
+    }
+
     // Playback Controls
     this.dom.btnPlayPause.addEventListener('click', () => this.togglePlayback());
     this.dom.btnReset.addEventListener('click', () => this.resetPlayback());
@@ -419,6 +428,7 @@ class WebTwinApp {
         const z = parseFloat(this.dom.singleIkZ.value) || 0;
         this.dom.singleIkFeedback.textContent = `Solving IK for ${this.activeJogRobot.toUpperCase()}...`;
         this.dom.singleIkFeedback.style.color = '#00F0FF';
+        this.log(`[Single IK] Solving IK for ${this.activeJogRobot.toUpperCase()} to target [${x}, ${y}, ${z}] mm...`, 'info');
         this.send({
           cmd: 'solve_single_ik',
           robot_id: this.activeJogRobot,
@@ -440,18 +450,11 @@ class WebTwinApp {
 
     // Manual Jogger Home Selected Robot
     this.dom.btnJogHome.addEventListener('click', () => {
-      const cfg = this.robotConfigs[this.activeJogRobot];
-      if (cfg) {
-        cfg.home_deg.forEach((deg, idx) => {
-          this.send({
-            cmd: 'manual_jog_joint',
-            robot_id: this.activeJogRobot,
-            joint_idx: idx,
-            angle_deg: deg,
-          });
-        });
-        this.log(`Reset ${this.activeJogRobot.toUpperCase()} to mechanical zero.`, 'info');
-      }
+      this.log(`[Manual Jogger] Resetting ${this.activeJogRobot.toUpperCase()} to mechanical HOME...`, 'info');
+      this.send({
+        cmd: 'home_arm',
+        robot_id: this.activeJogRobot,
+      });
     });
 
     // Handover Inspector Buttons (like Stage 3 Test 2 GUI)
@@ -609,15 +612,24 @@ class WebTwinApp {
       this.dom.timelineSlider.value = 0;
 
       const ps = data.plan_summary;
-      this.log(
-        `Plan generated: ${ps.pick_robot.toUpperCase()} -> ${ps.place_robot.toUpperCase()} | Min Clearance: ${ps.min_overall_clearance_mm} mm | Total Steps: ${ps.total_steps}`,
-        'success'
-      );
+      if (data.planning_logs) {
+        data.planning_logs.forEach((line) => {
+          this.log(line, 'info');
+        });
+      } else {
+        this.log(
+          `Plan generated: ${ps.pick_robot.toUpperCase()} -> ${ps.place_robot.toUpperCase()} | Min Clearance: ${ps.min_overall_clearance_mm} mm | Total Steps: ${ps.total_steps}`,
+          'success'
+        );
+      }
 
-      // Check if auto-execution was requested
+      // Check if auto-execution or auto-simulation was requested
       if (this.pendingPlan && this.pendingPlan.autoExecute) {
         this.dom.safetyClearanceVal.textContent = `${ps.min_overall_clearance_mm} mm`;
         this.dom.safetyModal.classList.add('active');
+      } else if (this.pendingPlan && this.pendingPlan.autoSimulate) {
+        this.applyStep(0);
+        this.startPlayback();
       } else {
         // Display the Stage 3 Test 2 Solution Summary Confirmation Dialog
         this._showSolutionSummaryDialog(ps);
@@ -628,6 +640,8 @@ class WebTwinApp {
     else if (data.cmd === 'home_result') {
       this.currentJointAngles = data.joint_state;
       this._updateJointTables(data.joint_state);
+      this._syncJoggerSliders(data.joint_state);
+      this._renderJoggerSliders();
       for (const [rid, frames] of Object.entries(data.frames)) {
         if (this.robots[rid]) {
           this.robots[rid].updatePose(frames.frames_world, frames.tcp_R, 'open');
@@ -640,8 +654,7 @@ class WebTwinApp {
           data.clearance.endpoint_b
         );
       }
-      this._renderJoggerSliders();
-      this.log('All robots returned to mechanical HOME positions.', 'success');
+      this.log('✓ All robots returned to mechanical HOME positions.', 'success');
     }
 
     // 5. Handover Inspector 3D Preview Result
@@ -670,6 +683,7 @@ class WebTwinApp {
     else if (data.cmd === 'manual_jog_result') {
       this.currentJointAngles = data.joint_state;
       this._updateJointTables(data.joint_state);
+      this._syncJoggerSliders(data.joint_state);
       for (const [rid, frames] of Object.entries(data.frames)) {
         if (this.robots[rid]) {
           const gState = this.activeGripperStates[rid] || 'open';
@@ -702,13 +716,14 @@ class WebTwinApp {
     // 8. Single-Robot Direct IK Result (testGUI 1, 2, 3)
     else if (data.cmd === 'solve_single_ik_result') {
       if (!data.success) {
-        this.dom.singleIkFeedback.textContent = `❌ ${data.error}`;
+        this.dom.singleIkFeedback.textContent = data.error;
         this.dom.singleIkFeedback.style.color = '#FF0055';
         this.log(`[Single IK] ${data.error}`, 'error');
         return;
       }
       this.currentJointAngles = data.joint_state;
       this._updateJointTables(data.joint_state);
+      this._syncJoggerSliders(data.joint_state);
       this._renderJoggerSliders();
       for (const [rid, frames] of Object.entries(data.frames)) {
         if (this.robots[rid]) {
@@ -739,7 +754,7 @@ class WebTwinApp {
   _setupRobots(robotConfigs) {
     for (const [rid, cfg] of Object.entries(robotConfigs)) {
       this.robots[rid] = new RobotArmModel(rid, cfg, this.scene.scene);
-      this.robots[rid].updatePose(cfg.frames_world, null, 'open');
+      this.robots[rid].updatePose(cfg.frames_world, cfg.tcp_R, 'open');
     }
     this._updateJointTables({
       robot1: robotConfigs.robot1.home_deg,
@@ -773,6 +788,23 @@ class WebTwinApp {
     if (jointState.robot1) buildRows(this.dom.jointR1Table, jointState.robot1);
     if (jointState.robot2) buildRows(this.dom.jointR2Table, jointState.robot2);
     if (jointState.robot3) buildRows(this.dom.jointR3Table, jointState.robot3);
+  }
+
+  _syncJoggerSliders(jointState) {
+    if (!jointState) return;
+    const rid = this.activeJogRobot;
+    const angles = jointState[rid];
+    if (!angles) return;
+    angles.forEach((angle, idx) => {
+      const slider = document.getElementById(`jog-slider-${rid}-${idx}`);
+      const valLabel = document.getElementById(`jog-val-${rid}-${idx}`);
+      if (slider && document.activeElement !== slider) {
+        slider.value = Math.round(angle);
+      }
+      if (valLabel) {
+        valLabel.textContent = `${angle.toFixed(1)}°`;
+      }
+    });
   }
 
   _renderJoggerSliders() {
@@ -979,10 +1011,15 @@ class WebTwinApp {
 
   startPlayback() {
     if (this.trajectorySteps.length === 0) return;
+    if (this.currentStepIdx >= this.trajectorySteps.length - 1) {
+      this.currentStepIdx = 0;
+    }
     this.isPlaying = true;
     this.dom.btnPlayPause.innerHTML = '<i class="fa fa-pause"></i> Pause';
     this.dom.btnPlayPause.classList.remove('btn-success');
     this.dom.btnPlayPause.classList.add('btn-primary');
+
+    this.log('▶ [3D Simulation] Starting 9-Phase Stage 3 Trajectory Preview...', 'info');
 
     const stepIntervalMs = Math.round(50 / this.playbackSpeed);
 
@@ -992,6 +1029,8 @@ class WebTwinApp {
       if (this.currentStepIdx >= this.trajectorySteps.length) {
         this.currentStepIdx = this.trajectorySteps.length - 1;
         this.pausePlayback();
+        this.log('✓ [3D Simulation] Complete! All trajectory phases safely completed.', 'success');
+        this.dom.phaseBadge.textContent = '✓ Simulation Complete';
       }
       this.dom.timelineSlider.value = this.currentStepIdx;
       this.applyStep(this.currentStepIdx);
@@ -1012,6 +1051,7 @@ class WebTwinApp {
   resetPlayback() {
     this.pausePlayback();
     this.currentStepIdx = 0;
+    this._lastLoggedPhase = null;
     this.dom.timelineSlider.value = 0;
     this.applyStep(0);
   }
@@ -1020,8 +1060,15 @@ class WebTwinApp {
     if (!this.trajectorySteps || stepIdx < 0 || stepIdx >= this.trajectorySteps.length) return;
     const step = this.trajectorySteps[stepIdx];
 
+    // Log phase transitions to System Log Console (matching stage3_test2_gui)
+    if (step.phase_title && step.phase_title !== this._lastLoggedPhase) {
+      this._lastLoggedPhase = step.phase_title;
+      this.log(`>>> ${step.phase_title}`, 'info');
+    }
+
     // Update joint angles table
     this._updateJointTables(step.joint_state);
+    this._syncJoggerSliders(step.joint_state);
 
     // Update 3D robot arm poses
     for (const [rid, frames] of Object.entries(step.frames)) {

@@ -72,9 +72,9 @@ class DynamicClearanceLaser {
     this.group.visible = true;
     this.currentDist = distMm;
 
-    // Coordinate conversion to Three.js: [X, Z, -Y]
-    const pA = new THREE.Vector3(ptA[0], ptA[2], -ptA[1]);
-    const pB = new THREE.Vector3(ptB[0], ptB[2], -ptB[1]);
+    // Direct 1:1 robotics coordinate matching [X, Y, Z] (Z is vertical height)
+    const pA = new THREE.Vector3(...ptA);
+    const pB = new THREE.Vector3(...ptB);
 
     this.beaconA.position.copy(pA);
     this.beaconB.position.copy(pB);
