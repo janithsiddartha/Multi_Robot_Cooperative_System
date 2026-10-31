@@ -36,7 +36,8 @@ for _parent in [_current_file.parent, *_current_file.parents]:
         break
 
 from robot_control.kinematics.robot_kinematics import KinematicsConfig
-from robot_control.kinematics.fk_math import mdh_matrix, dh_joint_angles, all_frame_positions
+from robot_control.kinematics.fk_math import mdh_matrix, dh_joint_angles, all_frame_positions, fk
+from robot_control.handover.handover_ik import geometric_jacobian_and_fk
 from robot_control.handover.object_pick_ik import solve_object_pick_ik
 from robot_control.handover.stage1_ik import solve_stage1_ik
 from robot_control.handover.stage1 import generate_interpolated_path, load_stage1_robots
@@ -292,9 +293,9 @@ class RobotGUI(Node):
         if not hasattr(self.solver_cfg, 'gripper_approach_axis'):
             self.solver_cfg.gripper_approach_axis = 'z'
 
-        self.dwell_time_s = 0.5
-        self.pick_wait_s = 1.0
-        self.place_wait_s = 1.0
+        self.dwell_time_s = 2.0
+        self.pick_wait_s = 2.0
+        self.place_wait_s = 2.0
         self.step_interval_s = 0.04
         self.trajectory_steps = 25
         self.is_trajectory_running = False
@@ -1193,13 +1194,20 @@ class RobotGUI(Node):
         entry_frame = tk.Frame(frame, bg=self.card_color)
         entry_frame.pack(fill='x', pady=(0, 6))
         
+        open_default = f"{float(self.gripper_open_angle):.0f}" if float(self.gripper_open_angle).is_integer() else f"{float(self.gripper_open_angle):.1f}"
+        close_default = f"{float(self.gripper_close_angle):.0f}" if float(self.gripper_close_angle).is_integer() else f"{float(self.gripper_close_angle):.1f}"
+
         tk.Label(entry_frame, text='Open°:', font=self.font_small, bg=self.card_color, fg=self.secondary_text).pack(side='left')
-        self.gripper_open_entry, open_cont = self.create_rounded_entry(entry_frame, '')
+        self.gripper_open_entry, open_cont = self.create_rounded_entry(entry_frame, open_default)
         open_cont.pack(side='left', padx=(2, 10))
+        self.gripper_open_entry.bind('<KeyRelease>', lambda e: self.update_session_gripper_open_angle(), add="+")
+        self.gripper_open_entry.bind('<FocusOut>', lambda e: self.update_session_gripper_open_angle(), add="+")
         
         tk.Label(entry_frame, text='Close°:', font=self.font_small, bg=self.card_color, fg=self.secondary_text).pack(side='left')
-        self.gripper_close_entry, close_cont = self.create_rounded_entry(entry_frame, '')
+        self.gripper_close_entry, close_cont = self.create_rounded_entry(entry_frame, close_default)
         close_cont.pack(side='left', padx=(2, 0))
+        self.gripper_close_entry.bind('<KeyRelease>', lambda e: self.update_session_gripper_close_angle(), add="+")
+        self.gripper_close_entry.bind('<FocusOut>', lambda e: self.update_session_gripper_close_angle(), add="+")
 
         btn_frame = tk.Frame(frame, bg=self.card_color)
         btn_frame.pack(fill='x', pady=(0, 6))
@@ -1209,6 +1217,30 @@ class RobotGUI(Node):
         self.gripper_close_button.pack(side='right', fill='x', expand=True, padx=(4, 0))
         self.gripper_status = tk.Label(frame, text='● UNKNOWN', font=self.font_bold, fg=self.disabled_color, bg=self.card_color)
         self.gripper_status.pack(pady=(2, 0))
+
+    def update_session_gripper_open_angle(self):
+        try:
+            val = self.gripper_open_entry.get().strip()
+            if val and val not in ('-', '+', '.'):
+                self.gripper_open_angle = float(val)
+        except Exception:
+            pass
+
+    def update_session_gripper_close_angle(self):
+        try:
+            val = self.gripper_close_entry.get().strip()
+            if val and val not in ('-', '+', '.'):
+                self.gripper_close_angle = float(val)
+        except Exception:
+            pass
+
+    def get_session_gripper_open_angle(self):
+        self.update_session_gripper_open_angle()
+        return float(self.gripper_open_angle)
+
+    def get_session_gripper_close_angle(self):
+        self.update_session_gripper_close_angle()
+        return float(self.gripper_close_angle)
 
     def create_speed_panel(self, parent):
         frame = self.create_section_frame(parent, 'MOTION SPEED')
@@ -2610,6 +2642,9 @@ class RobotGUI(Node):
         place_msg.data = list(place)
         self.place_pub.publish(place_msg)
 
+        session_open_angle = self.get_session_gripper_open_angle()
+        session_close_angle = self.get_session_gripper_close_angle()
+
         self.abort_trajectory = False
         self.is_trajectory_running = True
         self.trajectory_status_display.config(text='PLANNING...', bg=self.soft_blue, fg=self.primary_blue)
@@ -2619,7 +2654,7 @@ class RobotGUI(Node):
 
         self.trajectory_thread = threading.Thread(
             target=self._pick_and_place_worker,
-            args=(pick, pick_yaw, place, place_yaw),
+            args=(pick, pick_yaw, place, place_yaw, session_open_angle, session_close_angle),
             daemon=True
         )
         self.trajectory_thread.start()
@@ -2629,7 +2664,9 @@ class RobotGUI(Node):
         msg.data = [float(angle)]
         self.trajectory_gripper_pub.publish(msg)
         self.manual_gripper_pub.publish(msg)
-        state_txt = "CLOSED" if abs(angle - self.gripper_close_angle) < abs(angle - self.gripper_open_angle) else "OPEN"
+        open_a = float(self.gripper_open_angle)
+        close_a = float(self.gripper_close_angle)
+        state_txt = "CLOSED" if abs(angle - close_a) < abs(angle - open_a) else "OPEN"
         self.root.after(0, lambda: self.gripper_status.config(text=f"{state_txt}  -  {angle:.0f} deg"))
 
     def _on_trajectory_error(self, err_msg):
@@ -2652,8 +2689,78 @@ class RobotGUI(Node):
         self.root.after(0, lambda: self.status_label.config(text="Motion aborted by STOP command"))
         self.root.after(0, lambda: self.robot_state.config(text="● HALTED"))
 
-    def _pick_and_place_worker(self, pick_xyz, pick_yaw, place_xyz, place_yaw):
+    def _cartesian_linear_path(self, q_start_deg, target_xyz, config, num_steps=20):
+        """
+        Straight-line Cartesian approach/depart using Jacobian IK tracking.
+
+        At every interpolated step the TCP position is moved linearly from the
+        current FK position to *target_xyz* while the TCP orientation captured
+        at q_start_deg is kept constant (damped-least-squares Jacobian update).
+
+        Returns a list of joint-angle arrays in DEGREES, or None if IK fails.
+        """
+        q = np.deg2rad(np.asarray(q_start_deg, dtype=float))
+        q_min = config.joint_limits_rad[:, 0]
+        q_max = config.joint_limits_rad[:, 1]
+
+        # Capture starting TCP pose (position + orientation to freeze)
+        _, p_start, R_start = geometric_jacobian_and_fk(q, config)
+        p_target = np.asarray(target_xyz, dtype=float)
+
+        # Use 5-DOF weight: heavily weight position, lightly weight orientation
+        is_5dof = config.num_joints == 5
+        if is_5dof:
+            W = np.diag([1.0, 1.0, 1.0, 0.01, 0.01, 0.01])
+        else:
+            W = np.eye(6)
+
+        path_deg = []
+        for step in range(1, num_steps + 1):
+            t = step / num_steps
+            p_interp = p_start + t * (p_target - p_start)   # linear XYZ interpolation
+
+            # Iterative Jacobian IK to reach p_interp with R_start orientation
+            for _ in range(30):   # inner iterations per waypoint
+                J, p_cur, R_cur = geometric_jacobian_and_fk(q, config)
+
+                e_p = p_interp - p_cur
+
+                # Orientation error (axis-angle via quaternion)
+                from robot_control.handover.handover_ik import rotation_error_vector
+                e_R = rotation_error_vector(R_cur, R_start)
+
+                e = np.concatenate([e_p, e_R])
+
+                # Adaptive DLS
+                U, S, Vt = np.linalg.svd(J, full_matrices=False)
+                sigma_min = S[-1]
+                lam = 0.01 if sigma_min >= 0.01 else min(0.2, 0.01 + 0.1 * (1.0 - sigma_min / 0.01) ** 2)
+
+                if is_5dof:
+                    H = J.T @ W @ J + (lam ** 2) * np.eye(config.num_joints)
+                    dq = np.linalg.solve(H, J.T @ W @ e)
+                else:
+                    H = J.T @ J + (lam ** 2) * np.eye(config.num_joints)
+                    dq = np.linalg.solve(H, J.T @ e)
+
+                q = np.clip(q + 0.6 * dq, q_min, q_max)
+
+                if np.linalg.norm(e_p) < 0.5:   # 0.5 mm tolerance per waypoint
+                    break
+
+            path_deg.append(np.rad2deg(q).copy())
+
+        # Verify the final point is close enough
+        _, p_final, _ = geometric_jacobian_and_fk(q, config)
+        if np.linalg.norm(p_final - p_target) > 5.0:   # 5 mm tolerance overall
+            return None   # caller falls back to joint-space
+        return path_deg
+
+    def _pick_and_place_worker(self, pick_xyz, pick_yaw, place_xyz, place_yaw, session_open_angle=None, session_close_angle=None):
         try:
+            open_angle = session_open_angle if session_open_angle is not None else float(self.gripper_open_angle)
+            close_angle = session_close_angle if session_close_angle is not None else float(self.gripper_close_angle)
+
             # 1. Starting joint positions
             start_q = np.array(self.joint_angles, dtype=float).copy() if hasattr(self, 'joint_angles') and len(self.joint_angles) == self.config.num_joints else np.zeros(self.config.num_joints)
 
@@ -2697,7 +2804,7 @@ class RobotGUI(Node):
                 place_q = fallback_place.q_deg.copy()
                 place_desc = "stage1_ik (XYZ fallback)"
 
-            # 4. Attempt approach / lift waypoints
+            # 4. Attempt approach / lift waypoints (+50mm approach height)
             app_h = float(getattr(self.config, 'approach_height', 50.0))
             pre_pick_xyz = [pick_xyz[0], pick_xyz[1], pick_xyz[2] + app_h]
             pre_place_xyz = [place_xyz[0], place_xyz[1], place_xyz[2] + app_h]
@@ -2749,56 +2856,138 @@ class RobotGUI(Node):
                     time.sleep(dt)
                 return True
 
-            # Phase 1: Move to Pick (via pre_pick if available)
+            def sleep_check_abort(duration_s):
+                t_end = time.time() + duration_s
+                while time.time() < t_end:
+                    if self.abort_trajectory:
+                        return False
+                    time.sleep(min(0.05, max(0.001, t_end - time.time())))
+                return not self.abort_trajectory
+
+            # ------------------------------------------------------------------
+            # Helper: execute a Cartesian-space straight-line segment with
+            # orientation lock. Falls back to joint-space if IK tracking fails.
+            # ------------------------------------------------------------------
+            def execute_cartesian_descent(q_from_deg, target_xyz_mm, phase_title, num_steps=20):
+                """Straight-line Cartesian move (orientation held from q_from_deg)."""
+                if self.abort_trajectory:
+                    return None
+                self.root.after(0, lambda: self.task_status_label.config(text=f"Task Status: {phase_title} (Cartesian)"))
+                self.root.after(0, lambda: self.trajectory_status_display.config(text="RUNNING", bg=self.soft_blue, fg=self.primary_blue))
+
+                cart_path = self._cartesian_linear_path(
+                    q_from_deg, target_xyz_mm, self.solver_cfg, num_steps=num_steps
+                )
+
+                if cart_path is None:
+                    # IK tracking failed — fall back to joint-space
+                    self.root.after(0, lambda: self.status_label.config(
+                        text=f"[{phase_title}] Cartesian IK fallback to joint-space"
+                    ))
+                    # Solve endpoint IK for fallback target
+                    fb = solve_stage1_ik(self.robot_id, target_xyz_mm, self.solver_cfg,
+                                        current_q_deg=q_from_deg)
+                    if fb is None:
+                        return None
+                    ok = execute_steps(q_from_deg, fb.q_deg, phase_title)
+                    return fb.q_deg if ok else None
+
+                for q_step_deg in cart_path:
+                    if self.abort_trajectory:
+                        return None
+                    msg = Float64MultiArray()
+                    msg.data = [float(v) for v in q_step_deg]
+                    self.trajectory_joint_pub.publish(msg)
+                    self.manual_joint_pub.publish(msg)
+                    self.root.after(0, lambda q=q_step_deg: self.set_gui_joint_values(q))
+                    time.sleep(dt)
+
+                return cart_path[-1]   # final joint angles in degrees
+
+            # Phase 0: Ensure gripper is opened immediately at the very start of motion towards pick
+            self.root.after(0, lambda: self.task_status_label.config(text="Task Status: Opening gripper for approach..."))
+            self._send_trajectory_gripper(open_angle)
+
+            # Phase 1a: Move to Pre-Pick (joint-space — free-space travel)
             current_exec_q = start_q
             if pre_pick_q is not None:
                 if not execute_steps(current_exec_q, pre_pick_q, "Approaching Pick (Pre-Pick)"):
                     self._on_trajectory_abort()
                     return
                 current_exec_q = pre_pick_q
+                # Re-affirm OPEN gripper when at pre-pick height
+                self._send_trajectory_gripper(open_angle)
 
-            if not execute_steps(current_exec_q, pick_q, "Moving down to Pick Target"):
+            # Phase 1b: Descend to Pick Target — CARTESIAN STRAIGHT LINE
+            result_q = execute_cartesian_descent(
+                current_exec_q, pick_xyz, "Descending to Pick Target", num_steps=steps
+            )
+            if result_q is None:
                 self._on_trajectory_abort()
                 return
-            current_exec_q = pick_q
+            current_exec_q = result_q
 
-            # Phase 2: Grasp
-            self.root.after(0, lambda: self.task_status_label.config(text="Task Status: Grasping object..."))
-            time.sleep(self.dwell_time_s)
-            self._send_trajectory_gripper(self.gripper_close_angle)
-            time.sleep(self.pick_wait_s)
+            # Phase 2: Reached Pick Target -> Wait 2 sec -> Grasp (close) -> Wait 2 sec
+            self.root.after(0, lambda: self.task_status_label.config(text="Task Status: Reached pick target, waiting 2s..."))
+            if not sleep_check_abort(2.0):
+                self._on_trajectory_abort()
+                return
 
-            # Phase 3: Lift
+            self.root.after(0, lambda: self.task_status_label.config(text="Task Status: Closing gripper (grasp)..."))
+            self._send_trajectory_gripper(close_angle)
+
+            if not sleep_check_abort(2.0):
+                self._on_trajectory_abort()
+                return
+
+            # Phase 3: Ascend back to Pre-Pick — CARTESIAN STRAIGHT LINE
             if pre_pick_q is not None:
-                if not execute_steps(current_exec_q, pre_pick_q, "Lifting object"):
+                result_q = execute_cartesian_descent(
+                    current_exec_q, pre_pick_xyz, "Lifting to Pre-Pick (Cartesian)", num_steps=steps
+                )
+                if result_q is None:
                     self._on_trajectory_abort()
                     return
-                current_exec_q = pre_pick_q
+                current_exec_q = result_q
 
-            # Phase 4: Move to Place (via pre_place if available)
+            # Phase 4: Transfer to Pre-Place (joint-space — free-space travel, gripper closed)
             if pre_place_q is not None:
                 if not execute_steps(current_exec_q, pre_place_q, "Transferring to Place (Pre-Place)"):
                     self._on_trajectory_abort()
                     return
                 current_exec_q = pre_place_q
 
-            if not execute_steps(current_exec_q, place_q, "Lowering to Place Target"):
+            # Phase 4b: Descend to Place Target — CARTESIAN STRAIGHT LINE
+            result_q = execute_cartesian_descent(
+                current_exec_q, place_xyz, "Descending to Place Target", num_steps=steps
+            )
+            if result_q is None:
                 self._on_trajectory_abort()
                 return
-            current_exec_q = place_q
+            current_exec_q = result_q
 
-            # Phase 5: Release
-            self.root.after(0, lambda: self.task_status_label.config(text="Task Status: Releasing object..."))
-            time.sleep(self.dwell_time_s)
-            self._send_trajectory_gripper(self.gripper_open_angle)
-            time.sleep(self.place_wait_s)
+            # Phase 5: Reached Place Target -> Wait 2 sec -> Release (open) -> Wait 2 sec
+            self.root.after(0, lambda: self.task_status_label.config(text="Task Status: Reached place target, waiting 2s..."))
+            if not sleep_check_abort(2.0):
+                self._on_trajectory_abort()
+                return
 
-            # Phase 6: Retract & Return Home
+            self.root.after(0, lambda: self.task_status_label.config(text="Task Status: Opening gripper (release)..."))
+            self._send_trajectory_gripper(open_angle)
+
+            if not sleep_check_abort(2.0):
+                self._on_trajectory_abort()
+                return
+
+            # Phase 6a: Ascend back to Pre-Place — CARTESIAN STRAIGHT LINE
             if pre_place_q is not None:
-                if not execute_steps(current_exec_q, pre_place_q, "Retracting from Place Target"):
+                result_q = execute_cartesian_descent(
+                    current_exec_q, pre_place_xyz, "Retracting from Place (Cartesian)", num_steps=steps
+                )
+                if result_q is None:
                     self._on_trajectory_abort()
                     return
-                current_exec_q = pre_place_q
+                current_exec_q = result_q
 
             if not execute_steps(current_exec_q, home_q, "Returning to Home Position"):
                 self._on_trajectory_abort()
@@ -2830,16 +3019,7 @@ class RobotGUI(Node):
             )
             return
 
-        val = self.gripper_open_entry.get().strip()
-        if val:
-            try:
-                angle = float(val)
-            except ValueError:
-                self.status_label.config(text='Invalid Gripper Open Angle')
-                return
-        else:
-            angle = self.gripper_open_angle
-
+        angle = self.get_session_gripper_open_angle()
         self.send_manual_gripper(angle)
 
         self.gripper_status.config(
@@ -2847,7 +3027,7 @@ class RobotGUI(Node):
         )
 
         self.status_label.config(
-            text='Gripper OPEN command sent'
+            text=f'Gripper OPEN command sent ({angle:.1f}°)'
         )
 
 
@@ -2863,16 +3043,7 @@ class RobotGUI(Node):
             )
             return
 
-        val = self.gripper_close_entry.get().strip()
-        if val:
-            try:
-                angle = float(val)
-            except ValueError:
-                self.status_label.config(text='Invalid Gripper Close Angle')
-                return
-        else:
-            angle = self.gripper_close_angle
-
+        angle = self.get_session_gripper_close_angle()
         self.send_manual_gripper(angle)
 
         self.gripper_status.config(
@@ -2880,7 +3051,7 @@ class RobotGUI(Node):
         )
 
         self.status_label.config(
-            text='Gripper CLOSE command sent'
+            text=f'Gripper CLOSE command sent ({angle:.1f}°)'
         )
 
 

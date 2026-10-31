@@ -47,7 +47,11 @@ from robot_control.handover.trajectory_cache import (
     lookup_cached_target_ik,
     store_cached_target_ik,
 )
-from robot_control.kinematics.fk_math import all_frame_positions, fk
+from robot_control.kinematics.fk_math import all_frame_positions, fk, dh_joint_angles
+
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+from web_twin.ros_bridge import WebTwinRosBridge
 
 
 def dist_point_to_segment_pt(p: np.ndarray, a: np.ndarray, b: np.ndarray) -> Tuple[float, np.ndarray]:
@@ -244,6 +248,10 @@ class WebTwinEngine:
             self.robots["robot2"],
         )
 
+        initial_inspection = self.get_kinematics_inspection("robot1")
+        ports = ros_bridge.get_available_ports() if "ros_bridge" in globals() and ros_bridge else ["/dev/robot1", "/dev/robot2", "/dev/robot3"]
+        hw_states = ros_bridge.get_all_robot_states() if "ros_bridge" in globals() and ros_bridge else {}
+
         return {
             "type": "initial_state",
             "robots": robot_data,
@@ -257,6 +265,9 @@ class WebTwinEngine:
                 "endpoint_b": pt_b,
                 "pair": "robot1_robot2",
             },
+            "kinematics_inspection": initial_inspection,
+            "available_ports": ports,
+            "robot_hardware": hw_states,
         }
 
     def preview_handover(self, pair: str, which: str = "handover") -> dict:
@@ -383,14 +394,73 @@ class WebTwinEngine:
             }
         return res
 
-    def solve_single_ik(self, robot_id: str, target_xyz_world: List[float]) -> dict:
-        """Direct XYZ Inverse Kinematics solver for a single robot (matching testGUI 1, 2, 3)."""
+    def get_kinematics_inspection(self, robot_id: str, q_deg: Optional[List[float]] = None) -> dict:
+        """Calculate live 4x4 Transformation Matrix T0n, dynamic DH table, and system geometry."""
+        if robot_id not in self.robots:
+            return {"success": False, "error": f"Unknown robot {robot_id}"}
+
+        cfg = self.robots[robot_id]
+        if q_deg is None:
+            q_deg = list(self.current_q.get(robot_id, cfg.home_deg))
+
+        q_rad = np.deg2rad(q_deg)
+        p_tcp, T_flange = fk(q_rad, cfg)
+
+        p_world = cfg.world_base_R @ p_tcp + cfg.world_base_xyz
+        T_world = np.eye(4)
+        T_world[:3, :3] = cfg.world_base_R @ T_flange[:3, :3]
+        T_world[:3, 3] = p_world
+
+        theta_dh = dh_joint_angles(q_rad, cfg)
+        dh_rows = []
+        for i in range(cfg.num_frames):
+            th_deg = float(np.rad2deg(theta_dh[i]))
+            dh_rows.append({
+                "frame": f"F{i+1}",
+                "joint": f"J{cfg.theta_joint_index[i]+1}" if cfg.theta_joint_index[i] >= 0 else "-",
+                "a_mm": round(float(cfg.a[i]), 2) if i < len(cfg.a) else 0.0,
+                "d_mm": round(float(cfg.d[i]), 2) if i < len(cfg.d) else 0.0,
+                "alpha_deg": round(float(cfg.alpha_deg[i]), 1) if i < len(cfg.alpha_deg) else 0.0,
+                "theta_deg": round(th_deg, 1),
+                "limit_min_deg": round(float(cfg.joint_limits_deg[i][0]), 1) if i < len(cfg.joint_limits_deg) else -180.0,
+                "limit_max_deg": round(float(cfg.joint_limits_deg[i][1]), 1) if i < len(cfg.joint_limits_deg) else 180.0,
+            })
+
+        t_matrix = [[round(float(val), 3) for val in row] for row in T_world]
+        t_base_matrix = [[round(float(val), 3) for val in row] for row in T_flange]
+
+        geometry = {
+            "base_height_mm": round(float(cfg.d[0]), 2) if len(cfg.d) > 0 else 0.0,
+            "link1_mm": round(float(cfg.a[2]), 2) if len(cfg.a) > 2 else 0.0,
+            "link2_mm": round(float(cfg.d[3]), 2) if len(cfg.d) > 3 else 0.0,
+            "link3_mm": round(float(cfg.a[5]), 2) if len(cfg.a) > 5 else 0.0,
+            "link4_mm": round(float(cfg.d[6]), 2) if len(cfg.d) > 6 else 0.0,
+            "tool_length_mm": 0.0,
+            "reach_radius_mm": 370.0,
+            "dof": cfg.num_joints,
+        }
+
+        return {
+            "success": True,
+            "robot_id": robot_id,
+            "q_deg": [round(float(v), 2) for v in q_deg],
+            "tcp_world": [round(float(v), 2) for v in p_world],
+            "tcp_base": [round(float(v), 2) for v in p_tcp],
+            "transformation_matrix": t_matrix,
+            "transformation_matrix_base": t_base_matrix,
+            "dh_table": dh_rows,
+            "geometry": geometry,
+        }
+
+    def solve_single_ik(self, robot_id: str, target_xyz_world: List[float], target_yaw: float = 0.0) -> dict:
+        """Direct XYZ + Yaw Inverse Kinematics solver for a single robot (matching individual GUIs)."""
         if robot_id not in self.robots:
             return {
                 "cmd": "solve_single_ik_result",
                 "success": False,
                 "robot_id": robot_id,
                 "target_xyz": target_xyz_world,
+                "target_yaw": target_yaw,
                 "error": f"Unknown robot {robot_id}",
             }
         try:
@@ -398,16 +468,25 @@ class WebTwinEngine:
             target_world = np.array(target_xyz_world, dtype=float)
             current_q_deg = np.array(self.current_q[robot_id], dtype=float)
 
-            # Fast solve with 6 random starts (< 200ms)
             res = solve_stage1_ik(
                 robot_id=robot_id,
                 target_xyz_world=target_world,
                 config=cfg,
                 current_q_deg=current_q_deg,
-                num_random_starts=6,
+                num_random_starts=8,
             )
             if res is None:
-                # Target is outside reach envelope or has high error
+                # Fallback: check if coordinates were given in robot's local base frame (matching robot_gui.py)
+                target_world_alt = cfg.world_base_R @ target_world + cfg.world_base_xyz
+                res = solve_stage1_ik(
+                    robot_id=robot_id,
+                    target_xyz_world=target_world_alt,
+                    config=cfg,
+                    current_q_deg=current_q_deg,
+                    num_random_starts=8,
+                )
+
+            if res is None:
                 from robot_control.handover.stage1_ik import world_to_base
                 from robot_control.kinematics.ik_solver import ik_single
                 target_base = world_to_base(target_world, cfg)
@@ -419,14 +498,15 @@ class WebTwinEngine:
                     "success": False,
                     "robot_id": robot_id,
                     "target_xyz": target_xyz_world,
+                    "target_yaw": target_yaw,
                     "error_mm": round(err_mm, 3),
                     "error": f"IK FAILED | High error = {err_mm:.3f} mm (Target [{target_xyz_world[0]}, {target_xyz_world[1]}, {target_xyz_world[2]}] mm unreachable by {robot_id.upper()})",
                 }
 
             self.current_q[robot_id] = [round(float(v), 2) for v in res.q_deg]
             frame_data = self.compute_frames(self.current_q)
+            inspection = self.get_kinematics_inspection(robot_id, self.current_q[robot_id])
 
-            # Compute clearance to neighbor robots
             min_dist = float("inf")
             best_a, best_b = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
             for other_id in ["robot1", "robot2", "robot3"]:
@@ -446,10 +526,12 @@ class WebTwinEngine:
                 "success": True,
                 "robot_id": robot_id,
                 "target_xyz": target_xyz_world,
+                "target_yaw": target_yaw,
                 "error_mm": round(float(res.error_mm), 3),
                 "joint_angles": self.current_q[robot_id],
                 "joint_state": self.current_q,
                 "frames": frame_data,
+                "kinematics_inspection": inspection,
                 "clearance": {
                     "min_distance_mm": round(min_dist, 2),
                     "endpoint_a": best_a,
@@ -462,8 +544,107 @@ class WebTwinEngine:
                 "success": False,
                 "robot_id": robot_id,
                 "target_xyz": target_xyz_world,
+                "target_yaw": target_yaw,
                 "error": f"IK Solver error: {str(e)}",
             }
+
+    def plan_single_pick_place(
+        self,
+        robot_id: str,
+        pick_xyz: List[float],
+        pick_yaw: float,
+        place_xyz: List[float],
+        place_yaw: float,
+    ) -> dict:
+        """Autonomous single-robot Pick & Place trajectory generator (matching individual GUIs)."""
+        if robot_id not in self.robots:
+            return {"success": False, "error": f"Unknown robot {robot_id}"}
+
+        cfg = self.robots[robot_id]
+        current_q = np.array(self.current_q[robot_id], dtype=float)
+
+        pick_arr = np.array(pick_xyz, dtype=float)
+        pick_res = solve_stage1_ik(robot_id, pick_arr, cfg, current_q, num_random_starts=8)
+        if pick_res is None:
+            pick_world_alt = cfg.world_base_R @ pick_arr + cfg.world_base_xyz
+            pick_res = solve_stage1_ik(robot_id, pick_world_alt, cfg, current_q, num_random_starts=8)
+
+        if pick_res is None:
+            return {
+                "success": False,
+                "error": f"Pick position [{pick_xyz[0]}, {pick_xyz[1]}, {pick_xyz[2]}] mm is outside reach envelope of {robot_id.upper()}."
+            }
+
+        place_arr = np.array(place_xyz, dtype=float)
+        place_res = solve_stage1_ik(robot_id, place_arr, cfg, pick_res.q_deg, num_random_starts=8)
+        if place_res is None:
+            place_world_alt = cfg.world_base_R @ place_arr + cfg.world_base_xyz
+            place_res = solve_stage1_ik(robot_id, place_world_alt, cfg, pick_res.q_deg, num_random_starts=8)
+
+        if place_res is None:
+            return {
+                "success": False,
+                "error": f"Place position [{place_xyz[0]}, {place_xyz[1]}, {place_xyz[2]}] mm is outside reach envelope of {robot_id.upper()}."
+            }
+
+        home_deg = [float(v) for v in cfg.home_deg]
+        pick_deg = [round(float(v), 2) for v in pick_res.q_deg]
+        place_deg = [round(float(v), 2) for v in place_res.q_deg]
+
+        steps = []
+        def add_interp(q_start, q_end, num_steps, phase_name, grip_state):
+            for s in range(num_steps):
+                alpha = (s + 1) / float(num_steps)
+                q_interp = [float(q_start[j] + alpha * (q_end[j] - q_start[j])) for j in range(len(q_start))]
+                full_q = {r: list(self.current_q[r]) for r in ["robot1", "robot2", "robot3"]}
+                full_q[robot_id] = q_interp
+                steps.append({
+                    "step_idx": len(steps),
+                    "phase": phase_name,
+                    "joint_state": full_q,
+                    "frames": self.compute_frames(full_q),
+                    "gripper_state": {robot_id: grip_state},
+                })
+
+        add_interp(self.current_q[robot_id], pick_deg, 12, "1. Move to Pick Target", "open")
+        for _ in range(3):
+            full_q = {r: list(self.current_q[r]) for r in ["robot1", "robot2", "robot3"]}
+            full_q[robot_id] = pick_deg
+            steps.append({
+                "step_idx": len(steps),
+                "phase": "2. Grasp Object (Gripper Closed)",
+                "joint_state": full_q,
+                "frames": self.compute_frames(full_q),
+                "gripper_state": {robot_id: "close"},
+            })
+        add_interp(pick_deg, home_deg, 8, "3. Retract with Object", "close")
+        add_interp(home_deg, place_deg, 12, "4. Move to Place Target", "close")
+        for _ in range(3):
+            full_q = {r: list(self.current_q[r]) for r in ["robot1", "robot2", "robot3"]}
+            full_q[robot_id] = place_deg
+            steps.append({
+                "step_idx": len(steps),
+                "phase": "5. Release Object (Gripper Open)",
+                "joint_state": full_q,
+                "frames": self.compute_frames(full_q),
+                "gripper_state": {robot_id: "open"},
+            })
+        add_interp(place_deg, home_deg, 10, "6. Return to Mechanical Home", "open")
+
+        return {
+            "success": True,
+            "cmd": "single_pick_place_planned",
+            "robot_id": robot_id,
+            "pick_xyz": pick_xyz,
+            "pick_yaw": pick_yaw,
+            "place_xyz": place_xyz,
+            "place_yaw": place_yaw,
+            "pick_q_deg": pick_deg,
+            "place_q_deg": place_deg,
+            "steps": steps,
+            "total_steps": len(steps),
+        }
+
 
     def check_reachability(self, target_xyz: List[float], target_yaw: float = 0.0) -> dict:
         """Query reachability across all robots using Stage 2.5 object IK and fallback."""
@@ -775,152 +956,180 @@ class WebTwinEngine:
         }
 
 
-# Global engine instance
+# Global engine & hardware bridge instances
 twin_engine = WebTwinEngine()
+ros_bridge = WebTwinRosBridge(twin_engine)
+
+ACTIVE_WEBSOCKETS: set = set()
+
+
+async def telemetry_broadcaster(app: web.Application):
+    """High-speed 10 Hz broadcaster pushing live ROS 2 telemetry to all connected web clients."""
+    print("[WebTwin] Started ROS 2 telemetry broadcast daemon (10 Hz).")
+    while True:
+        try:
+            await asyncio.sleep(0.1)
+            if ACTIVE_WEBSOCKETS and ros_bridge:
+                hw_state = ros_bridge.get_all_robot_states()
+                payload = json.dumps({
+                    "cmd": "telemetry_broadcast",
+                    "hardware": hw_state,
+                    "joint_state": twin_engine.current_q,
+                    "grippers": twin_engine.gripper_state,
+                })
+                dead = set()
+                for ws in list(ACTIVE_WEBSOCKETS):
+                    if ws.closed:
+                        dead.add(ws)
+                    else:
+                        try:
+                            await ws.send_str(payload)
+                        except Exception:
+                            dead.add(ws)
+                if dead:
+                    ACTIVE_WEBSOCKETS.difference_update(dead)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            await asyncio.sleep(0.5)
 
 
 async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
     ws = web.WebSocketResponse(heartbeat=25.0)
     await ws.prepare(request)
     loop = asyncio.get_running_loop()
-    print(f"[WebTwin] New client connected from {request.remote}")
+    ACTIVE_WEBSOCKETS.add(ws)
+    print(f"[WebTwin] New client connected from {request.remote} (Total clients: {len(ACTIVE_WEBSOCKETS)})")
 
     # Send initial state immediately
     await ws.send_str(json.dumps(twin_engine.get_initial_payload()))
 
-    async for msg in ws:
-        if msg.type == WSMsgType.TEXT:
-            try:
-                data = json.loads(msg.data)
-                cmd = data.get("cmd")
+    try:
+        async for msg in ws:
+            if msg.type == WSMsgType.TEXT:
+                try:
+                    data = json.loads(msg.data)
+                    cmd = data.get("cmd")
 
-                if cmd == "get_initial_state":
-                    await ws.send_str(json.dumps(twin_engine.get_initial_payload()))
+                    if cmd == "get_initial_state":
+                        await ws.send_str(json.dumps(twin_engine.get_initial_payload()))
 
-                elif cmd == "check_reachability":
-                    target_xyz = data.get("target_xyz", [0.0, 0.0, 200.0])
-                    target_yaw = float(data.get("target_yaw", 0.0))
-                    res = await loop.run_in_executor(
-                        None, twin_engine.check_reachability, target_xyz, target_yaw
-                    )
-                    res["cmd"] = "reachability_result"
-                    res["target_type"] = data.get("target_type", "pick")
-                    await ws.send_str(json.dumps(res))
+                    elif cmd == "get_ports":
+                        ports = ros_bridge.refresh_available_ports()
+                        await ws.send_str(json.dumps({
+                            "cmd": "ports_list",
+                            "available_ports": ports,
+                        }))
 
-                elif cmd == "manual_fk":
-                    joint_state = data.get("joint_state", {})
-                    frame_data = twin_engine.compute_frames(joint_state)
-                    # Compute clearance between Robot 1 and Robot 2
-                    q1 = np.array(joint_state.get("robot1", twin_engine.current_q["robot1"]))
-                    q2 = np.array(joint_state.get("robot2", twin_engine.current_q["robot2"]))
-                    dist_mm, pt_a, pt_b = compute_laser_endpoints(
-                        q1, twin_engine.robots["robot1"], q2, twin_engine.robots["robot2"]
-                    )
-                    await ws.send_str(json.dumps({
-                        "cmd": "manual_fk_result",
-                        "frames": frame_data,
-                        "clearance": {
-                            "min_distance_mm": round(dist_mm, 2),
-                            "endpoint_a": pt_a,
-                            "endpoint_b": pt_b,
-                            "pair": "robot1_robot2",
-                        },
-                    }))
+                    elif cmd == "set_robot_port":
+                        robot_id = data.get("robot_id", "robot1")
+                        port = data.get("port", "/dev/robot1")
+                        res = ros_bridge.set_robot_port(robot_id, port)
+                        await ws.send_str(json.dumps({"cmd": "set_port_result", **res}))
 
-                elif cmd == "plan_trajectory":
-                    pick_xyz = data.get("pick_xyz", twin_engine.default_pick)
-                    pick_yaw = float(data.get("pick_yaw", 0.0))
-                    place_xyz = data.get("place_xyz", twin_engine.default_place)
-                    place_yaw = float(data.get("place_yaw", 0.0))
-                    chosen_pick = data.get("chosen_pick_robot")
-                    chosen_place = data.get("chosen_place_robot")
+                    elif cmd == "emergency_stop":
+                        target = data.get("robot_id", "all")
+                        res = ros_bridge.emergency_stop(target)
+                        await ws.send_str(json.dumps({"cmd": "emergency_stop_result", **res}))
 
-                    plan_res = await loop.run_in_executor(
-                        None,
-                        lambda: twin_engine.plan_trajectory(
-                            pick_xyz=pick_xyz,
-                            pick_yaw=pick_yaw,
-                            place_xyz=place_xyz,
-                            place_yaw=place_yaw,
-                            chosen_pick_robot=chosen_pick,
-                            chosen_place_robot=chosen_place,
-                        ),
-                    )
-                    plan_res["cmd"] = "trajectory_planned"
-                    if not ws.closed:
-                        await ws.send_str(json.dumps(plan_res))
+                    elif cmd == "resume_manual":
+                        target = data.get("robot_id", "all")
+                        res = ros_bridge.resume_manual(target)
+                        await ws.send_str(json.dumps({"cmd": "resume_manual_result", **res}))
 
-                elif cmd == "preview_handover":
-                    pair = data.get("pair", "robot1_robot2")
-                    which = data.get("which", "handover")
-                    res = twin_engine.preview_handover(pair, which)
-                    if not ws.closed:
-                        await ws.send_str(json.dumps(res))
-
-                elif cmd == "manual_jog_joint":
-                    robot_id = data.get("robot_id", "robot1")
-                    joint_idx = int(data.get("joint_idx", 0))
-                    angle_deg = float(data.get("angle_deg", 0.0))
-                    res = twin_engine.manual_jog_joint(robot_id, joint_idx, angle_deg)
-                    if not ws.closed:
-                        await ws.send_str(json.dumps(res))
-
-                elif cmd == "toggle_gripper":
-                    robot_id = data.get("robot_id", "robot1")
-                    state = data.get("state", "open")
-                    res = twin_engine.toggle_gripper(robot_id, state)
-                    if not ws.closed:
-                        await ws.send_str(json.dumps(res))
-
-                elif cmd == "solve_single_ik":
-                    robot_id = data.get("robot_id", "robot1")
-                    target_xyz = data.get("target_xyz", [200.0, 100.0, 150.0])
-                    res = await loop.run_in_executor(
-                        None, twin_engine.solve_single_ik, robot_id, target_xyz
-                    )
-                    if not ws.closed:
-                        await ws.send_str(json.dumps(res))
-
-                elif cmd == "home_all":
-                    twin_engine.current_q = {
-                        "robot1": [float(v) for v in twin_engine.robots["robot1"].home_deg],
-                        "robot2": [float(v) for v in twin_engine.robots["robot2"].home_deg],
-                        "robot3": [float(v) for v in twin_engine.robots["robot3"].home_deg],
-                    }
-                    frame_data = twin_engine.compute_frames(twin_engine.current_q)
-                    min_d, pt_a, pt_b = compute_laser_endpoints(
-                        np.array(twin_engine.current_q["robot1"]),
-                        twin_engine.robots["robot1"],
-                        np.array(twin_engine.current_q["robot2"]),
-                        twin_engine.robots["robot2"],
-                    )
-                    if not ws.closed:
+                    elif cmd == "home_robot":
+                        target = data.get("robot_id", "robot1")
+                        res = ros_bridge.home_robot(target)
+                        frame_data = twin_engine.compute_frames(twin_engine.current_q)
                         await ws.send_str(json.dumps({
                             "cmd": "home_result",
                             "joint_state": twin_engine.current_q,
                             "frames": frame_data,
-                            "clearance": {
-                                "min_distance_mm": round(min_d, 2),
-                                "endpoint_a": pt_a,
-                                "endpoint_b": pt_b,
-                                "pair": "robot1_robot2",
-                            },
+                            **res,
                         }))
 
-                elif cmd == "home_arm":
-                    robot_id = data.get("robot_id", "robot1")
-                    if robot_id in twin_engine.robots:
-                        twin_engine.current_q[robot_id] = [float(v) for v in twin_engine.robots[robot_id].home_deg]
-                        frame_data = twin_engine.compute_frames(twin_engine.current_q)
-                        q1 = np.array(twin_engine.current_q["robot1"])
-                        q2 = np.array(twin_engine.current_q["robot2"])
+                    elif cmd == "set_robot_speed":
+                        robot_id = data.get("robot_id", "robot1")
+                        speed = int(data.get("speed", 5))
+                        res = ros_bridge.set_speed(robot_id, speed)
+                        await ws.send_str(json.dumps({"cmd": "speed_result", **res}))
+
+                    elif cmd == "set_gripper_limits":
+                        robot_id = data.get("robot_id", "robot1")
+                        open_d = float(data.get("open_deg", 90.0))
+                        close_d = float(data.get("close_deg", 0.0))
+                        res = ros_bridge.set_gripper_limits(robot_id, open_d, close_d)
+                        await ws.send_str(json.dumps({"cmd": "gripper_limits_result", **res}))
+
+                    elif cmd == "set_gripper_angle":
+                        robot_id = data.get("robot_id", "robot1")
+                        angle = float(data.get("angle", 90.0))
+                        state = data.get("state", "CUSTOM")
+                        res = ros_bridge.set_gripper(robot_id, angle, state)
+                        twin_engine.gripper_state[robot_id] = "open" if state == "OPEN" else ("close" if state == "CLOSED" else state)
+                        await ws.send_str(json.dumps({"cmd": "gripper_angle_result", **res}))
+
+                    elif cmd == "get_kinematics_inspection":
+                        robot_id = data.get("robot_id", "robot1")
+                        q_deg = data.get("q_deg")
+                        res = twin_engine.get_kinematics_inspection(robot_id, q_deg)
+                        res["cmd"] = "kinematics_inspection_result"
+                        await ws.send_str(json.dumps(res))
+
+                    elif cmd == "plan_single_pick_place":
+                        robot_id = data.get("robot_id", "robot1")
+                        pick_xyz = data.get("pick_xyz", [200.0, 100.0, 150.0])
+                        pick_yaw = float(data.get("pick_yaw", 0.0))
+                        place_xyz = data.get("place_xyz", [150.0, -100.0, 180.0])
+                        place_yaw = float(data.get("place_yaw", 0.0))
+                        res = await loop.run_in_executor(
+                            None,
+                            twin_engine.plan_single_pick_place,
+                            robot_id,
+                            pick_xyz,
+                            pick_yaw,
+                            place_xyz,
+                            place_yaw,
+                        )
+                        await ws.send_str(json.dumps(res))
+
+                    elif cmd == "execute_single_pick_place":
+                        robot_id = data.get("robot_id", "robot1")
+                        pick_xyz = data.get("pick_xyz", [200.0, 100.0, 150.0])
+                        pick_yaw = float(data.get("pick_yaw", 0.0))
+                        place_xyz = data.get("place_xyz", [150.0, -100.0, 180.0])
+                        place_yaw = float(data.get("place_yaw", 0.0))
+                        res = ros_bridge.execute_single_pick_place(
+                            robot_id, pick_xyz, pick_yaw, place_xyz, place_yaw
+                        )
+                        await ws.send_str(json.dumps({"cmd": "execute_single_result", **res}))
+
+                    elif cmd == "execute_hardware_trajectory":
+                        steps = data.get("steps", [])
+                        delay = float(data.get("step_delay", 0.08))
+                        res = ros_bridge.execute_multi_robot_trajectory(steps, step_delay=delay)
+                        await ws.send_str(json.dumps({"cmd": "execute_hardware_result", **res}))
+
+                    elif cmd == "check_reachability":
+                        target_xyz = data.get("target_xyz", [0.0, 0.0, 200.0])
+                        target_yaw = float(data.get("target_yaw", 0.0))
+                        res = await loop.run_in_executor(
+                            None, twin_engine.check_reachability, target_xyz, target_yaw
+                        )
+                        res["cmd"] = "reachability_result"
+                        res["target_type"] = data.get("target_type", "pick")
+                        await ws.send_str(json.dumps(res))
+
+                    elif cmd == "manual_fk":
+                        joint_state = data.get("joint_state", {})
+                        frame_data = twin_engine.compute_frames(joint_state)
+                        q1 = np.array(joint_state.get("robot1", twin_engine.current_q["robot1"]))
+                        q2 = np.array(joint_state.get("robot2", twin_engine.current_q["robot2"]))
                         dist_mm, pt_a, pt_b = compute_laser_endpoints(
                             q1, twin_engine.robots["robot1"], q2, twin_engine.robots["robot2"]
                         )
-                        res = {
-                            "cmd": "manual_jog_result",
-                            "robot_id": robot_id,
-                            "joint_state": twin_engine.current_q,
+                        await ws.send_str(json.dumps({
+                            "cmd": "manual_fk_result",
                             "frames": frame_data,
                             "clearance": {
                                 "min_distance_mm": round(dist_mm, 2),
@@ -928,19 +1137,138 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
                                 "endpoint_b": pt_b,
                                 "pair": "robot1_robot2",
                             },
-                        }
+                        }))
+
+                    elif cmd == "plan_trajectory":
+                        pick_xyz = data.get("pick_xyz", twin_engine.default_pick)
+                        pick_yaw = float(data.get("pick_yaw", 0.0))
+                        place_xyz = data.get("place_xyz", twin_engine.default_place)
+                        place_yaw = float(data.get("place_yaw", 0.0))
+                        chosen_pick = data.get("chosen_pick_robot")
+                        chosen_place = data.get("chosen_place_robot")
+
+                        plan_res = await loop.run_in_executor(
+                            None,
+                            lambda: twin_engine.plan_trajectory(
+                                pick_xyz=pick_xyz,
+                                pick_yaw=pick_yaw,
+                                place_xyz=place_xyz,
+                                place_yaw=place_yaw,
+                                chosen_pick_robot=chosen_pick,
+                                chosen_place_robot=chosen_place,
+                            ),
+                        )
+                        plan_res["cmd"] = "trajectory_planned"
+                        if not ws.closed:
+                            await ws.send_str(json.dumps(plan_res))
+
+                    elif cmd == "preview_handover":
+                        pair = data.get("pair", "robot1_robot2")
+                        which = data.get("which", "handover")
+                        res = twin_engine.preview_handover(pair, which)
                         if not ws.closed:
                             await ws.send_str(json.dumps(res))
 
-            except Exception as e:
-                traceback.print_exc()
-                if not ws.closed:
-                    await ws.send_str(json.dumps({"cmd": "error", "message": str(e)}))
+                    elif cmd == "manual_jog_joint":
+                        robot_id = data.get("robot_id", "robot1")
+                        joint_idx = int(data.get("joint_idx", 0))
+                        angle_deg = float(data.get("angle_deg", 0.0))
+                        res = twin_engine.manual_jog_joint(robot_id, joint_idx, angle_deg)
+                        # Also stream to hardware
+                        ros_bridge.publish_manual_joints(robot_id, twin_engine.current_q[robot_id])
+                        # Attach kinematics inspection
+                        res["kinematics_inspection"] = twin_engine.get_kinematics_inspection(robot_id, twin_engine.current_q[robot_id])
+                        if not ws.closed:
+                            await ws.send_str(json.dumps(res))
 
-        elif msg.type == WSMsgType.ERROR:
-            print(f"[WebTwin] WebSocket error: {ws.exception()}")
+                    elif cmd == "toggle_gripper":
+                        robot_id = data.get("robot_id", "robot1")
+                        state = data.get("state", "open")
+                        res = twin_engine.toggle_gripper(robot_id, state)
+                        # Publish to hardware
+                        ang = ros_bridge.robot_states[robot_id]["gripper_open_deg"] if state == "open" else ros_bridge.robot_states[robot_id]["gripper_close_deg"]
+                        ros_bridge.set_gripper(robot_id, ang, state.upper())
+                        if not ws.closed:
+                            await ws.send_str(json.dumps(res))
 
-    print("[WebTwin] Client disconnected.")
+                    elif cmd == "solve_single_ik":
+                        robot_id = data.get("robot_id", "robot1")
+                        target_xyz = data.get("target_xyz", [200.0, 100.0, 150.0])
+                        target_yaw = float(data.get("target_yaw", 0.0))
+                        res = await loop.run_in_executor(
+                            None, twin_engine.solve_single_ik, robot_id, target_xyz, target_yaw
+                        )
+                        if res.get("success"):
+                            ros_bridge.publish_manual_joints(robot_id, twin_engine.current_q[robot_id])
+                        if not ws.closed:
+                            await ws.send_str(json.dumps(res))
+
+                    elif cmd == "home_all":
+                        ros_bridge.home_robot("all")
+                        twin_engine.current_q = {
+                            "robot1": [float(v) for v in twin_engine.robots["robot1"].home_deg],
+                            "robot2": [float(v) for v in twin_engine.robots["robot2"].home_deg],
+                            "robot3": [float(v) for v in twin_engine.robots["robot3"].home_deg],
+                        }
+                        frame_data = twin_engine.compute_frames(twin_engine.current_q)
+                        min_d, pt_a, pt_b = compute_laser_endpoints(
+                            np.array(twin_engine.current_q["robot1"]),
+                            twin_engine.robots["robot1"],
+                            np.array(twin_engine.current_q["robot2"]),
+                            twin_engine.robots["robot2"],
+                        )
+                        if not ws.closed:
+                            await ws.send_str(json.dumps({
+                                "cmd": "home_result",
+                                "joint_state": twin_engine.current_q,
+                                "frames": frame_data,
+                                "clearance": {
+                                    "min_distance_mm": round(min_d, 2),
+                                    "endpoint_a": pt_a,
+                                    "endpoint_b": pt_b,
+                                    "pair": "robot1_robot2",
+                                },
+                            }))
+
+                    elif cmd == "home_arm":
+                        robot_id = data.get("robot_id", "robot1")
+                        ros_bridge.home_robot(robot_id)
+                        if robot_id in twin_engine.robots:
+                            twin_engine.current_q[robot_id] = [float(v) for v in twin_engine.robots[robot_id].home_deg]
+                            frame_data = twin_engine.compute_frames(twin_engine.current_q)
+                            q1 = np.array(twin_engine.current_q["robot1"])
+                            q2 = np.array(twin_engine.current_q["robot2"])
+                            dist_mm, pt_a, pt_b = compute_laser_endpoints(
+                                q1, twin_engine.robots["robot1"], q2, twin_engine.robots["robot2"]
+                            )
+                            res = {
+                                "cmd": "manual_jog_result",
+                                "robot_id": robot_id,
+                                "joint_state": twin_engine.current_q,
+                                "frames": frame_data,
+                                "kinematics_inspection": twin_engine.get_kinematics_inspection(robot_id, twin_engine.current_q[robot_id]),
+                                "clearance": {
+                                    "min_distance_mm": round(dist_mm, 2),
+                                    "endpoint_a": pt_a,
+                                    "endpoint_b": pt_b,
+                                    "pair": "robot1_robot2",
+                                },
+                            }
+                            if not ws.closed:
+                                await ws.send_str(json.dumps(res))
+
+                except Exception as e:
+                    traceback.print_exc()
+                    if not ws.closed:
+                        await ws.send_str(json.dumps({"cmd": "error", "message": str(e)}))
+
+            elif msg.type == WSMsgType.ERROR:
+                print(f"[WebTwin] WebSocket error: {ws.exception()}")
+
+    finally:
+        ACTIVE_WEBSOCKETS.discard(ws)
+        print(f"[WebTwin] Client disconnected from {request.remote} (Remaining clients: {len(ACTIVE_WEBSOCKETS)})")
+
     return ws
 
 
@@ -959,8 +1287,23 @@ async def handle_index(request: web.Request) -> web.Response:
         return web.Response(text=f.read(), content_type="text/html")
 
 
+async def on_app_startup(app: web.Application):
+    """Start the ROS 2 background bridge and telemetry broadcaster."""
+    ros_bridge.start()
+    app["telemetry_broadcaster_task"] = asyncio.create_task(telemetry_broadcaster(app))
+
+
+async def on_app_cleanup(app: web.Application):
+    """Clean up background tasks and ROS 2 node."""
+    if "telemetry_broadcaster_task" in app:
+        app["telemetry_broadcaster_task"].cancel()
+    ros_bridge.stop()
+
+
 def create_app() -> web.Application:
     app = web.Application(middlewares=[no_cache_middleware])
+    app.on_startup.append(on_app_startup)
+    app.on_cleanup.append(on_app_cleanup)
     app.router.add_get("/", handle_index)
     app.router.add_get("/ws", handle_websocket)
     static_dir = os.path.join(SCRIPT_DIR, "static")
@@ -979,7 +1322,7 @@ def main():
     print("  🚀 rt_AI GPU-ACCELERATED 3D WEB DIGITAL TWIN")
     print(f"  Server URL: http://localhost:{args.port}")
     print(f"  WebSocket:  ws://localhost:{args.port}/ws")
-    print("  Stage:      Stage 3 Test 2 Production Kinematics")
+    print("  Stage:      Stage 3 Test 2 Production Kinematics + ROS 2 Hardware Bridge")
     print("=" * 70)
 
     app = create_app()

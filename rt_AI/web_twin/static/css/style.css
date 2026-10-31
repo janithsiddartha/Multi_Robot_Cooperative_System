@@ -1022,3 +1022,97 @@ h1.brand-title {
   background: rgba(255, 255, 255, 0.04);
 }
 
+/* Pulsing Red Emergency Stop Button */
+.pulse-danger {
+  background: var(--status-danger) !important;
+  color: white !important;
+  box-shadow: 0 0 15px rgba(255, 0, 85, 0.6);
+  animation: pulse-danger-anim 1.5s infinite;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px;
+}
+@keyframes pulse-danger-anim {
+  0% { box-shadow: 0 0 8px rgba(255, 0, 85, 0.5); }
+  50% { box-shadow: 0 0 22px rgba(255, 0, 85, 0.95); }
+  100% { box-shadow: 0 0 8px rgba(255, 0, 85, 0.5); }
+}
+
+/* 4x4 Homogeneous Transformation Matrix Display */
+.matrix-grid-4x4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.matrix-cell {
+  background: rgba(255, 255, 255, 0.04);
+  padding: 4px 2px;
+  text-align: center;
+  border-radius: 3px;
+  color: var(--robot1-cyan);
+}
+.matrix-cell.trans {
+  color: var(--status-safe);
+  font-weight: 700;
+}
+
+/* Precision Slider Controls with Direct Numeric Input */
+.jogger-row-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.jogger-num-input {
+  width: 58px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--robot1-cyan);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 5px;
+  text-align: right;
+}
+.jogger-num-input:focus {
+  outline: none;
+  border-color: var(--robot1-cyan);
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.35);
+}
+
+/* Hardware Dock Cards & Status Badges */
+.hw-robot-card {
+  padding: 12px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hw-status-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+}
+.hw-status-connected {
+  background: rgba(0, 255, 157, 0.15);
+  color: var(--status-safe);
+  border: 1px solid rgba(0, 255, 157, 0.4);
+}
+.hw-status-disconnected {
+  background: rgba(255, 0, 85, 0.15);
+  color: var(--status-danger);
+  border: 1px solid rgba(255, 0, 85, 0.4);
+}
+.hw-status-connecting {
+  background: rgba(255, 184, 0, 0.15);
+  color: var(--status-warn);
+  border: 1px solid rgba(255, 184, 0, 0.4);
+}
+

@@ -53,6 +53,9 @@
       </div>
 
       <div class="header-actions">
+        <button id="btn-emergency-stop" class="btn btn-sm pulse-danger" title="Immediate Emergency Stop - Halt all physical robots">
+          <i class="fa fa-hand"></i> ■ EMERGENCY STOP
+        </button>
         <button id="btn-home" class="btn btn-glass btn-sm" title="Return all physical robots to mechanical home">
           <i class="fa fa-house"></i> Home All
         </button>
@@ -69,14 +72,20 @@
 
         <!-- Sidebar Mode Navigation Tabs -->
         <nav class="sidebar-mode-nav">
-          <button class="mode-nav-btn active" data-tab="tab-planner">
-            <i class="fa fa-bolt"></i> Stage 3 Planner
+          <button class="mode-nav-btn active" data-tab="tab-planner" title="Stage 3 Autonomous Multi-Robot Handover">
+            <i class="fa fa-bolt"></i> Stage 3
           </button>
-          <button class="mode-nav-btn" data-tab="tab-jogger">
-            <i class="fa fa-gamepad"></i> Manual Jogger
+          <button class="mode-nav-btn" data-tab="tab-single-pp" title="Autonomous Single-Robot Pick & Place">
+            <i class="fa fa-arrows-split-up-and-left"></i> Single P&amp;P
           </button>
-          <button class="mode-nav-btn" data-tab="tab-inspector">
-            <i class="fa fa-handshake"></i> Handover
+          <button class="mode-nav-btn" data-tab="tab-jogger" title="Manual Joint Jogger, Direct IK & DH Matrix">
+            <i class="fa fa-gamepad"></i> Jog &amp; IK
+          </button>
+          <button class="mode-nav-btn" data-tab="tab-hardware" title="Serial Port Connection & Hardware Controller">
+            <i class="fa fa-plug"></i> Hardware
+          </button>
+          <button class="mode-nav-btn" data-tab="tab-inspector" title="Pre-Handover & Standoff Pose Inspector">
+            <i class="fa fa-handshake"></i> Stances
           </button>
         </nav>
 
@@ -190,7 +199,108 @@
         </div>
 
         <!-- ========================================================
-             PANEL 2: SINGLE ROBOT KINEMATICS & JOGGER (testGUI 1, 2, 3)
+             PANEL 2: AUTONOMOUS SINGLE-ROBOT PICK & PLACE
+             ======================================================== -->
+        <div id="tab-single-pp" class="sidebar-pane">
+          <!-- Active Robot Selector Pills -->
+          <div class="glass-card" style="padding: 10px; margin-bottom: 8px;">
+            <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px;">Select Robot for Task</div>
+            <div class="single-pp-robot-pills" style="display: flex; gap: 4px;">
+              <button class="jogger-pill active single-robot-pill" data-robot="robot1">R1 (5-DOF, 0°)</button>
+              <button class="jogger-pill single-robot-pill" data-robot="robot2">R2 (5-DOF, 180°)</button>
+              <button class="jogger-pill single-robot-pill" data-robot="robot3">R3 (6-DOF, 90°)</button>
+            </div>
+          </div>
+
+          <!-- Single Pick Coordinate Card -->
+          <section class="glass-card card-cyan" style="padding: 12px; margin-bottom: 8px;">
+            <div class="card-header" style="margin-bottom: 6px;">
+              <span class="card-title" style="font-size: 12px; color: var(--robot1-cyan);">
+                <i class="fa fa-crosshairs"></i> Single Pick Target
+              </span>
+              <button id="btn-spp-pick-current" class="btn btn-glass btn-sm" style="font-size: 10px; padding: 2px 8px;">SET CURRENT</button>
+            </div>
+            <div class="coord-grid">
+              <div class="input-group">
+                <label for="input-spp-pick-x" class="input-label">X [mm]</label>
+                <input type="number" id="input-spp-pick-x" class="input-control" value="200.0" step="5">
+              </div>
+              <div class="input-group">
+                <label for="input-spp-pick-y" class="input-label">Y [mm]</label>
+                <input type="number" id="input-spp-pick-y" class="input-control" value="100.0" step="5">
+              </div>
+              <div class="input-group">
+                <label for="input-spp-pick-z" class="input-label">Z [mm]</label>
+                <input type="number" id="input-spp-pick-z" class="input-control" value="150.0" step="5">
+              </div>
+            </div>
+            <div class="input-group" style="margin-top: 6px;">
+              <label for="input-spp-pick-yaw" class="input-label">Target Yaw ψ [deg]</label>
+              <input type="number" id="input-spp-pick-yaw" class="input-control" value="0.0">
+            </div>
+          </section>
+
+          <!-- Single Place Coordinate Card -->
+          <section class="glass-card card-violet" style="padding: 12px; margin-bottom: 8px;">
+            <div class="card-header" style="margin-bottom: 6px;">
+              <span class="card-title" style="font-size: 12px; color: var(--robot2-violet);">
+                <i class="fa fa-location-dot"></i> Single Place Target
+              </span>
+              <button id="btn-spp-place-current" class="btn btn-glass btn-sm" style="font-size: 10px; padding: 2px 8px;">SET CURRENT</button>
+            </div>
+            <div class="coord-grid">
+              <div class="input-group">
+                <label for="input-spp-place-x" class="input-label">X [mm]</label>
+                <input type="number" id="input-spp-place-x" class="input-control" value="150.0" step="5">
+              </div>
+              <div class="input-group">
+                <label for="input-spp-place-y" class="input-label">Y [mm]</label>
+                <input type="number" id="input-spp-place-y" class="input-control" value="-100.0" step="5">
+              </div>
+              <div class="input-group">
+                <label for="input-spp-place-z" class="input-label">Z [mm]</label>
+                <input type="number" id="input-spp-place-z" class="input-control" value="180.0" step="5">
+              </div>
+            </div>
+            <div class="input-group" style="margin-top: 6px;">
+              <label for="input-spp-place-yaw" class="input-label">Target Yaw ψ [deg]</label>
+              <input type="number" id="input-spp-place-yaw" class="input-control" value="0.0">
+            </div>
+          </section>
+
+          <!-- Action Buttons -->
+          <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+            <button id="btn-spp-swap" class="btn btn-glass btn-sm" style="flex: 1; font-size: 11px;">
+              <i class="fa fa-arrows-rotate"></i> ⇅ Swap
+            </button>
+            <button id="btn-spp-clear" class="btn btn-glass btn-sm" style="flex: 1; font-size: 11px;">
+              <i class="fa fa-eraser"></i> Clear
+            </button>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <button id="btn-spp-simulate" class="btn btn-success btn-full" style="font-size: 11px; padding: 9px; font-weight: 700;">
+              <i class="fa fa-play"></i> ▶ PREVIEW 3D MOTION
+            </button>
+            <button id="btn-spp-execute" class="btn btn-danger btn-full" style="font-size: 11px; padding: 9px; font-weight: 700;">
+              <i class="fa fa-bolt"></i> ⚡ EXECUTE ON HARDWARE
+            </button>
+          </div>
+
+          <div class="glass-card" style="padding: 10px; margin-top: 8px; font-family: var(--font-mono); font-size: 11px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+              <span style="color: var(--text-dim);">Task Status:</span>
+              <span id="spp-task-status" style="color: var(--status-safe); font-weight: 700;">IDLE</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span style="color: var(--text-dim);">ROS Trajectory:</span>
+              <span id="spp-traj-badge" class="badge-tag">READY</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ========================================================
+             PANEL 3: MANUAL JOGGER, DIRECT IK & DH MATRIX
              ======================================================== -->
         <div id="tab-jogger" class="sidebar-pane">
           <!-- Active Robot Selector Pills -->
@@ -203,41 +313,57 @@
             </div>
           </div>
 
-          <!-- Submode Nav Pills (Joint Sliders / Direct IK / DH Parameters) -->
+          <!-- Submode Nav Pills -->
           <div style="display: flex; gap: 4px; margin-bottom: 8px;">
-            <button class="jog-subtab-btn active" data-subtab="jog-sub-joints" style="flex:1;">Joint Sliders</button>
+            <button class="jog-subtab-btn active" data-subtab="jog-sub-joints" style="flex:1;">Joints</button>
             <button class="jog-subtab-btn" data-subtab="jog-sub-ik" style="flex:1;">Direct IK</button>
-            <button class="jog-subtab-btn" data-subtab="jog-sub-dh" style="flex:1;">DH Table</button>
+            <button class="jog-subtab-btn" data-subtab="jog-sub-dh" style="flex:1;">DH Matrix</button>
+            <button class="jog-subtab-btn" data-subtab="jog-sub-gripper" style="flex:1;">Gripper</button>
           </div>
 
-          <!-- Subtab 1: Joint Jogger Sliders -->
+          <!-- Subtab 1: Joint Jogger Sliders with Direct Numeric Typing -->
           <div id="jog-sub-joints" class="jog-subpane active">
             <div id="jogger-sliders-container" class="glass-card" style="padding: 12px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px;">
-              <!-- Generated dynamically in JS based on active robot -->
+              <!-- Generated dynamically in JS based on active robot with slider + input box -->
             </div>
+            <button id="btn-copy-joints" class="btn btn-glass btn-full" style="font-size: 11px; padding: 6px; margin-bottom: 8px;">
+              <i class="fa fa-clipboard"></i> 📋 Copy Joints Array
+            </button>
           </div>
 
-          <!-- Subtab 2: Direct Target IK (from testGUI 1, 2, 3) -->
+          <!-- Subtab 2: Direct Target IK (with Yaw, Set Current, Clear, Copy) -->
           <div id="jog-sub-ik" class="jog-subpane">
             <section class="glass-card" style="padding: 12px; margin-bottom: 8px;">
-              <div style="font-size: 11px; font-weight: 700; color: var(--robot1-cyan); margin-bottom: 8px; text-transform: uppercase;">
-                <i class="fa fa-crosshairs"></i> Direct Target IK Solver
+              <div style="font-size: 11px; font-weight: 700; color: var(--robot1-cyan); margin-bottom: 8px; text-transform: uppercase; display: flex; justify-content: space-between;">
+                <span><i class="fa fa-crosshairs"></i> Direct Target IK Solver</span>
+                <span id="single-ik-badge" class="badge-tag">READY</span>
               </div>
               <div class="coord-inputs-3">
                 <div class="coord-field">
                   <label for="input-single-ik-x">X (mm)</label>
-                  <input type="number" id="input-single-ik-x" class="input-control" value="200.0">
+                  <input type="number" id="input-single-ik-x" class="input-control" value="200.0" step="5">
                 </div>
                 <div class="coord-field">
                   <label for="input-single-ik-y">Y (mm)</label>
-                  <input type="number" id="input-single-ik-y" class="input-control" value="100.0">
+                  <input type="number" id="input-single-ik-y" class="input-control" value="100.0" step="5">
                 </div>
                 <div class="coord-field">
                   <label for="input-single-ik-z">Z (mm)</label>
-                  <input type="number" id="input-single-ik-z" class="input-control" value="150.0">
+                  <input type="number" id="input-single-ik-z" class="input-control" value="150.0" step="5">
                 </div>
               </div>
-              <button id="btn-solve-single-ik" class="btn btn-primary btn-full" style="margin-top: 8px; font-size: 11px;">
+              <div class="input-group" style="margin-top: 6px;">
+                <label for="input-single-ik-yaw" class="input-label">Target Yaw ψ [deg]</label>
+                <input type="number" id="input-single-ik-yaw" class="input-control" value="0.0">
+              </div>
+
+              <div style="display: flex; gap: 4px; margin-top: 6px;">
+                <button id="btn-single-ik-current" class="btn btn-glass btn-sm" style="flex: 1; font-size: 10px;">SET CURRENT</button>
+                <button id="btn-single-ik-clear" class="btn btn-glass btn-sm" style="flex: 1; font-size: 10px;">CLEAR</button>
+                <button id="btn-copy-xyz" class="btn btn-glass btn-sm" style="flex: 1; font-size: 10px;">📋 COPY XYZ</button>
+              </div>
+
+              <button id="btn-solve-single-ik" class="btn btn-primary btn-full" style="margin-top: 8px; font-size: 11px; padding: 8px;">
                 <i class="fa fa-calculator"></i> Solve IK &amp; Pose Arm
               </button>
               <div id="single-ik-feedback" style="margin-top: 6px; font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);">
@@ -246,35 +372,94 @@
             </section>
           </div>
 
-          <!-- Subtab 3: DH Parameters Table (from testGUI 1, 2, 3) -->
+          <!-- Subtab 3: DH Parameters Table & 4x4 Transformation Matrix -->
           <div id="jog-sub-dh" class="jog-subpane">
+            <!-- 4x4 Homogeneous Transformation Matrix Display -->
+            <div class="glass-card" style="padding: 10px; margin-bottom: 8px;">
+              <div style="font-size: 11px; font-weight: 700; color: var(--status-safe); margin-bottom: 6px; text-transform: uppercase;">
+                <i class="fa fa-cubes"></i> 4x4 Transformation Matrix (T0n)
+              </div>
+              <div id="matrix-grid-display" class="matrix-grid-4x4">
+                <!-- 16 cells populated by JS -->
+              </div>
+            </div>
+
+            <!-- Dynamic DH Table with Live Theta Updates -->
             <div class="glass-card" style="padding: 10px; margin-bottom: 8px; overflow-x: auto;">
               <div style="font-size: 11px; font-weight: 700; color: var(--robot1-cyan); margin-bottom: 6px; text-transform: uppercase;">
-                <i class="fa fa-table"></i> Modified DH Parameters
+                <i class="fa fa-table"></i> Modified DH Parameters (Live θ)
               </div>
               <table id="dh-params-table" class="dh-table" style="width: 100%; font-size: 10px; font-family: var(--font-mono); border-collapse: collapse;">
                 <thead>
                   <tr style="border-bottom: 1px solid rgba(255,255,255,0.15); color: var(--text-muted); text-align: left;">
-                    <th style="padding: 3px;">Joint</th>
-                    <th style="padding: 3px;">θ Off</th>
-                    <th style="padding: 3px;">d (mm)</th>
-                    <th style="padding: 3px;">a (mm)</th>
-                    <th style="padding: 3px;">α (°)</th>
-                    <th style="padding: 3px;">Limits</th>
+                    <th style="padding: 3px;">Frame</th>
+                    <th style="padding: 3px;">a [mm]</th>
+                    <th style="padding: 3px;">d [mm]</th>
+                    <th style="padding: 3px;">α [°]</th>
+                    <th style="padding: 3px; color: var(--robot1-cyan);">θ [°]</th>
                   </tr>
                 </thead>
                 <tbody id="dh-params-tbody"></tbody>
               </table>
             </div>
+
+            <!-- System Geometry & Workspace Specs -->
+            <div class="glass-card" style="padding: 10px; margin-bottom: 8px; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);">
+              <div style="color: var(--text-main); font-weight: 700; margin-bottom: 4px;">GEOMETRIC SPECIFICATIONS</div>
+              <div id="geometry-breakdown">Loading robot geometry...</div>
+            </div>
           </div>
 
-          <!-- Quick Actions & Gripper Toggle -->
+          <!-- Subtab 4: Gripper Tuning & Motion Speed -->
+          <div id="jog-sub-gripper" class="jog-subpane">
+            <section class="glass-card" style="padding: 12px; margin-bottom: 8px;">
+              <div style="font-size: 11px; font-weight: 700; color: var(--robot1-cyan); margin-bottom: 8px; text-transform: uppercase; display: flex; justify-content: space-between;">
+                <span><i class="fa fa-hand"></i> Gripper Mechanical Tuning</span>
+                <span id="gripper-status-badge" class="badge-tag">OPEN</span>
+              </div>
+              <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                <div class="input-group" style="flex: 1;">
+                  <label for="input-gripper-open-limit" class="input-label">Open Angle [°]</label>
+                  <input type="number" id="input-gripper-open-limit" class="input-control" value="90.0">
+                </div>
+                <div class="input-group" style="flex: 1;">
+                  <label for="input-gripper-close-limit" class="input-label">Close Angle [°]</label>
+                  <input type="number" id="input-gripper-close-limit" class="input-control" value="0.0">
+                </div>
+              </div>
+              <button id="btn-save-gripper-limits" class="btn btn-glass btn-full" style="font-size: 10px; padding: 4px; margin-bottom: 8px;">
+                Save Angle Limits
+              </button>
+
+              <div class="input-group" style="margin-bottom: 6px;">
+                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 2px;">
+                  <span>Continuous Angle:</span>
+                  <span id="gripper-angle-val" style="color: var(--robot1-cyan); font-family: var(--font-mono);">90.0°</span>
+                </div>
+                <input type="range" id="slider-gripper-continuous" class="yaw-slider" min="0" max="180" value="90">
+              </div>
+
+              <div style="display: flex; gap: 6px; margin-top: 8px;">
+                <button id="btn-gripper-open-cmd" class="btn btn-glass btn-sm" style="flex: 1; font-size: 11px;">
+                  ◱ OPEN
+                </button>
+                <button id="btn-gripper-close-cmd" class="btn btn-glass btn-sm" style="flex: 1; font-size: 11px;">
+                  ◲ CLOSE
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <!-- System Control Panel (Home, Resume, Stop) -->
           <div style="display: flex; gap: 6px; margin-bottom: 8px;">
-            <button id="btn-jog-gripper" class="btn btn-glass btn-sm" style="flex: 1; font-size: 11px;">
-              <i class="fa fa-hand"></i> Toggle Gripper
-            </button>
             <button id="btn-jog-home" class="btn btn-glass btn-sm" style="flex: 1; font-size: 11px;">
               <i class="fa fa-house"></i> Home Arm
+            </button>
+            <button id="btn-jog-resume" class="btn btn-glass btn-sm" style="flex: 1; font-size: 11px;">
+              <i class="fa fa-rotate-left"></i> Resume Manual
+            </button>
+            <button id="btn-jog-stop" class="btn btn-danger btn-sm" style="flex: 1; font-size: 11px;">
+              <i class="fa fa-stop"></i> Stop Arm
             </button>
           </div>
 
@@ -285,6 +470,122 @@
               <span id="jog-fk-status" class="badge-tag">READY</span>
             </div>
             <div id="jog-tcp-world" style="color: var(--robot1-cyan); font-weight: 700;">X: --, Y: --, Z: -- mm</div>
+          </div>
+        </div>
+
+        <!-- ========================================================
+             PANEL 4: PHYSICAL HARDWARE & SERIAL PORT DOCK
+             ======================================================== -->
+        <div id="tab-hardware" class="sidebar-pane">
+          <div class="glass-card" style="padding: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <span style="font-size: 11px; font-weight: 700; color: var(--text-main); text-transform: uppercase;">
+                <i class="fa fa-microchip"></i> Physical Robot Link
+              </span>
+              <div id="hw-ros-status" style="font-size: 10px; color: var(--status-safe);">ROS 2 Core Bridge: STANDBY</div>
+            </div>
+            <button id="btn-refresh-ports" class="btn btn-glass btn-sm" style="font-size: 10px; padding: 4px 8px;" title="Scan system USB/ACM serial ports">
+              <i class="fa fa-arrows-rotate"></i> Scan Ports
+            </button>
+          </div>
+
+          <!-- Robot 1 Hardware Card -->
+          <div class="glass-card card-cyan hw-robot-card">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 12px; font-weight: 700; color: var(--robot1-cyan);">
+                <i class="fa fa-robot"></i> Robot 1 (5-DOF, 0°)
+              </span>
+              <div style="display: flex; gap: 4px;">
+                <span id="hw-r1-mode-badge" class="hw-status-badge hw-status-connected">MANUAL</span>
+                <span id="hw-r1-conn-badge" class="hw-status-badge hw-status-disconnected">DISCONNECTED</span>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 6px; align-items: center;">
+              <select id="select-r1-port" class="input-control hw-port-dropdown" style="flex: 1; padding: 5px; font-size: 11px; font-family: var(--font-mono);">
+                <option value="/dev/robot1">/dev/robot1</option>
+              </select>
+              <button class="btn btn-primary btn-sm btn-hw-connect" data-robot="robot1" style="font-size: 10px; padding: 5px 10px;">
+                SET PORT
+              </button>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+              <span style="color: var(--text-dim);">Motion Speed:</span>
+              <span id="hw-r1-speed-val" style="color: var(--robot1-cyan); font-weight: 700; font-family: var(--font-mono);">Speed 5 / 10</span>
+            </div>
+            <input type="range" class="yaw-slider hw-speed-slider" data-robot="robot1" min="1" max="10" value="5">
+
+            <div style="display: flex; gap: 6px; margin-top: 4px;">
+              <button class="btn btn-glass btn-sm btn-hw-home" data-robot="robot1" style="flex: 1; font-size: 10px;">⌂ Home</button>
+              <button class="btn btn-glass btn-sm btn-hw-resume" data-robot="robot1" style="flex: 1; font-size: 10px;">↺ Resume</button>
+            </div>
+          </div>
+
+          <!-- Robot 2 Hardware Card -->
+          <div class="glass-card card-violet hw-robot-card">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 12px; font-weight: 700; color: var(--robot2-violet);">
+                <i class="fa fa-robot"></i> Robot 2 (5-DOF, 180°)
+              </span>
+              <div style="display: flex; gap: 4px;">
+                <span id="hw-r2-mode-badge" class="hw-status-badge hw-status-connected">MANUAL</span>
+                <span id="hw-r2-conn-badge" class="hw-status-badge hw-status-disconnected">DISCONNECTED</span>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 6px; align-items: center;">
+              <select id="select-r2-port" class="input-control hw-port-dropdown" style="flex: 1; padding: 5px; font-size: 11px; font-family: var(--font-mono);">
+                <option value="/dev/robot2">/dev/robot2</option>
+              </select>
+              <button class="btn btn-primary btn-sm btn-hw-connect" data-robot="robot2" style="font-size: 10px; padding: 5px 10px;">
+                SET PORT
+              </button>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+              <span style="color: var(--text-dim);">Motion Speed:</span>
+              <span id="hw-r2-speed-val" style="color: var(--robot2-violet); font-weight: 700; font-family: var(--font-mono);">Speed 5 / 10</span>
+            </div>
+            <input type="range" class="yaw-slider violet hw-speed-slider" data-robot="robot2" min="1" max="10" value="5">
+
+            <div style="display: flex; gap: 6px; margin-top: 4px;">
+              <button class="btn btn-glass btn-sm btn-hw-home" data-robot="robot2" style="flex: 1; font-size: 10px;">⌂ Home</button>
+              <button class="btn btn-glass btn-sm btn-hw-resume" data-robot="robot2" style="flex: 1; font-size: 10px;">↺ Resume</button>
+            </div>
+          </div>
+
+          <!-- Robot 3 Hardware Card -->
+          <div class="glass-card card-amber hw-robot-card">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 12px; font-weight: 700; color: var(--robot3-amber);">
+                <i class="fa fa-robot"></i> Robot 3 (6-DOF, 90°)
+              </span>
+              <div style="display: flex; gap: 4px;">
+                <span id="hw-r3-mode-badge" class="hw-status-badge hw-status-connected">MANUAL</span>
+                <span id="hw-r3-conn-badge" class="hw-status-badge hw-status-disconnected">DISCONNECTED</span>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 6px; align-items: center;">
+              <select id="select-r3-port" class="input-control hw-port-dropdown" style="flex: 1; padding: 5px; font-size: 11px; font-family: var(--font-mono);">
+                <option value="/dev/robot3">/dev/robot3</option>
+              </select>
+              <button class="btn btn-primary btn-sm btn-hw-connect" data-robot="robot3" style="font-size: 10px; padding: 5px 10px;">
+                SET PORT
+              </button>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+              <span style="color: var(--text-dim);">Motion Speed:</span>
+              <span id="hw-r3-speed-val" style="color: var(--robot3-amber); font-weight: 700; font-family: var(--font-mono);">Speed 5 / 10</span>
+            </div>
+            <input type="range" class="yaw-slider hw-speed-slider" data-robot="robot3" min="1" max="10" value="5" style="accent-color: var(--robot3-amber);">
+
+            <div style="display: flex; gap: 6px; margin-top: 4px;">
+              <button class="btn btn-glass btn-sm btn-hw-home" data-robot="robot3" style="flex: 1; font-size: 10px;">⌂ Home</button>
+              <button class="btn btn-glass btn-sm btn-hw-resume" data-robot="robot3" style="flex: 1; font-size: 10px;">↺ Resume</button>
+            </div>
           </div>
         </div>
 

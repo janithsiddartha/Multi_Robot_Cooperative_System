@@ -14,7 +14,15 @@ class WebTwinApp {
     this.robotConfigs = {};
     this.currentJointAngles = {};
     this.activeJogRobot = 'robot1';
+    this.activeSinglePpRobot = 'robot1';
     this.activeGripperStates = { robot1: 'open', robot2: 'open', robot3: 'open' };
+    this.gripperLimits = {
+      robot1: { open: 90.0, close: 0.0 },
+      robot2: { open: 90.0, close: 0.0 },
+      robot3: { open: 90.0, close: 0.0 },
+    };
+    this.hardwareState = { available_ports: [], robots: {} };
+    this.kinematicsInspection = {};
 
     // Simulation / Playback state
     this.trajectorySteps = [];
@@ -38,12 +46,13 @@ class WebTwinApp {
       wsStatusDot: document.getElementById('ws-status-dot'),
       wsStatusText: document.getElementById('ws-status-text'),
       canvas: document.getElementById('webgl-canvas'),
+      btnEmergencyStop: document.getElementById('btn-emergency-stop'),
 
       // Sidebar Tabs
       modeNavBtns: document.querySelectorAll('.mode-nav-btn'),
       sidebarPanes: document.querySelectorAll('.sidebar-pane'),
 
-      // Planning Inputs - Pick
+      // Planning Inputs - Pick (Stage 3)
       pickX: document.getElementById('input-pick-x'),
       pickY: document.getElementById('input-pick-y'),
       pickZ: document.getElementById('input-pick-z'),
@@ -51,7 +60,7 @@ class WebTwinApp {
       pickYawSlider: document.getElementById('slider-pick-yaw'),
       pickBadge: document.getElementById('badge-pick-status'),
 
-      // Planning Inputs - Place
+      // Planning Inputs - Place (Stage 3)
       placeX: document.getElementById('input-place-x'),
       placeY: document.getElementById('input-place-y'),
       placeZ: document.getElementById('input-place-z'),
@@ -63,17 +72,59 @@ class WebTwinApp {
       btnSimulateTask: document.getElementById('btn-simulate-task'),
       btnExecuteTask: document.getElementById('btn-execute-task'),
       btnPlan: document.getElementById('btn-plan'),
+      planLoadingBanner: document.getElementById('plan-loading-banner'),
+      planLoadingTitle: document.getElementById('plan-loading-title'),
+      planLoadingSubtitle: document.getElementById('plan-loading-subtitle'),
 
-      // Single-Robot Kinematics Subtabs & Direct IK (testGUI 1, 2, 3)
+      // Panel 2: Autonomous Single-Robot Pick & Place
+      singlePpRobotPills: document.querySelectorAll('.single-robot-pill'),
+      sppPickX: document.getElementById('input-spp-pick-x'),
+      sppPickY: document.getElementById('input-spp-pick-y'),
+      sppPickZ: document.getElementById('input-spp-pick-z'),
+      sppPickYaw: document.getElementById('input-spp-pick-yaw'),
+      sppPlaceX: document.getElementById('input-spp-place-x'),
+      sppPlaceY: document.getElementById('input-spp-place-y'),
+      sppPlaceZ: document.getElementById('input-spp-place-z'),
+      sppPlaceYaw: document.getElementById('input-spp-place-yaw'),
+      btnSppPickCurrent: document.getElementById('btn-spp-pick-current'),
+      btnSppPlaceCurrent: document.getElementById('btn-spp-place-current'),
+      btnSppSwap: document.getElementById('btn-spp-swap'),
+      btnSppClear: document.getElementById('btn-spp-clear'),
+      btnSppSimulate: document.getElementById('btn-spp-simulate'),
+      btnSppExecute: document.getElementById('btn-spp-execute'),
+      sppTaskStatus: document.getElementById('spp-task-status'),
+      sppTrajBadge: document.getElementById('spp-traj-badge'),
+
+      // Panel 3: Single-Robot Kinematics Subtabs & Direct IK (testGUI 1, 2, 3)
       jogSubtabBtns: document.querySelectorAll('.jog-subtab-btn'),
       jogSubpanes: document.querySelectorAll('.jog-subpane'),
       singleIkX: document.getElementById('input-single-ik-x'),
       singleIkY: document.getElementById('input-single-ik-y'),
       singleIkZ: document.getElementById('input-single-ik-z'),
+      singleIkYaw: document.getElementById('input-single-ik-yaw'),
       btnSolveSingleIk: document.getElementById('btn-solve-single-ik'),
+      btnSingleIkCurrent: document.getElementById('btn-single-ik-current'),
+      btnSingleIkClear: document.getElementById('btn-single-ik-clear'),
+      btnCopyXyz: document.getElementById('btn-copy-xyz'),
+      btnCopyJoints: document.getElementById('btn-copy-joints'),
       singleIkFeedback: document.getElementById('single-ik-feedback'),
+      singleIkBadge: document.getElementById('single-ik-badge'),
       dhParamsTbody: document.getElementById('dh-params-tbody'),
       jogFkStatus: document.getElementById('jog-fk-status'),
+      matrixGridDisplay: document.getElementById('matrix-grid-display'),
+      geometryBreakdown: document.getElementById('geometry-breakdown'),
+
+      // Panel 3: Gripper Mechanical Tuning & Controls
+      gripperOpenLimit: document.getElementById('input-gripper-open-limit'),
+      gripperCloseLimit: document.getElementById('input-gripper-close-limit'),
+      btnSaveGripperLimits: document.getElementById('btn-save-gripper-limits'),
+      sliderGripperContinuous: document.getElementById('slider-gripper-continuous'),
+      gripperAngleVal: document.getElementById('gripper-angle-val'),
+      btnGripperOpenCmd: document.getElementById('btn-gripper-open-cmd'),
+      btnGripperCloseCmd: document.getElementById('btn-gripper-close-cmd'),
+      gripperStatusBadge: document.getElementById('gripper-status-badge'),
+      btnJogResume: document.getElementById('btn-jog-resume'),
+      btnJogStop: document.getElementById('btn-jog-stop'),
 
       // Handover Telemetry Card
       hoCoords: document.getElementById('ho-coords'),
@@ -87,11 +138,33 @@ class WebTwinApp {
       btnInspectHome: document.getElementById('btn-inspect-home'),
 
       // Manual Joint Jogger (Robot GUI 1, 2, 3)
-      joggerPills: document.querySelectorAll('.jogger-pill'),
+      joggerPills: document.querySelectorAll('.jogger-pill:not(.single-robot-pill)'),
       joggerSlidersContainer: document.getElementById('jogger-sliders-container'),
       btnJogGripper: document.getElementById('btn-jog-gripper'),
       btnJogHome: document.getElementById('btn-jog-home'),
       jogTcpWorld: document.getElementById('jog-tcp-world'),
+
+      // Panel 4: Physical Hardware Dock
+      btnRefreshPorts: document.getElementById('btn-refresh-ports'),
+      hwRosStatus: document.getElementById('hw-ros-status'),
+      selectPortR1: document.getElementById('select-r1-port'),
+      selectPortR2: document.getElementById('select-r2-port'),
+      selectPortR3: document.getElementById('select-r3-port'),
+      hwModeBadges: {
+        robot1: document.getElementById('hw-r1-mode-badge'),
+        robot2: document.getElementById('hw-r2-mode-badge'),
+        robot3: document.getElementById('hw-r3-mode-badge'),
+      },
+      hwConnBadges: {
+        robot1: document.getElementById('hw-r1-conn-badge'),
+        robot2: document.getElementById('hw-r2-conn-badge'),
+        robot3: document.getElementById('hw-r3-conn-badge'),
+      },
+      hwSpeedVals: {
+        robot1: document.getElementById('hw-r1-speed-val'),
+        robot2: document.getElementById('hw-r2-speed-val'),
+        robot3: document.getElementById('hw-r3-speed-val'),
+      },
 
       // Timeline & Controls
       btnHomeAll: document.getElementById('btn-home'),
@@ -341,8 +414,147 @@ class WebTwinApp {
     this.dom.btnConfirmExecute.addEventListener('click', () => {
       this.dom.safetyModal.classList.remove('active');
       this.log('🚀 Safety gate confirmed. Hardware trajectory streaming initiated...', 'success');
+      if (this.trajectorySteps && this.trajectorySteps.length > 0) {
+        this.send({
+          cmd: 'execute_hardware_trajectory',
+          steps: this.trajectorySteps,
+          step_delay: 0.08,
+        });
+      }
       this.startPlayback();
     });
+
+    // Top Header Emergency Stop Button
+    if (this.dom.btnEmergencyStop) {
+      this.dom.btnEmergencyStop.addEventListener('click', () => {
+        this.log('🛑 [EMERGENCY STOP] HALTING ALL PHYSICAL ROBOTS!', 'error');
+        this.send({ cmd: 'emergency_stop', robot_id: 'all' });
+      });
+    }
+
+    // Panel 2: Autonomous Single-Robot Pick & Place
+    if (this.dom.singlePpRobotPills) {
+      this.dom.singlePpRobotPills.forEach((pill) => {
+        pill.addEventListener('click', () => {
+          this.dom.singlePpRobotPills.forEach((p) => p.classList.remove('active'));
+          pill.classList.add('active');
+          this.activeSinglePpRobot = pill.getAttribute('data-robot');
+          this.log(`[Single P&P] Active robot set to ${this.activeSinglePpRobot.toUpperCase()}`, 'info');
+        });
+      });
+    }
+
+    if (this.dom.btnSppPickCurrent) {
+      this.dom.btnSppPickCurrent.addEventListener('click', () => {
+        const cfg = this.robotConfigs[this.activeSinglePpRobot];
+        if (cfg && cfg.tcp_world) {
+          this.dom.sppPickX.value = cfg.tcp_world[0].toFixed(1);
+          this.dom.sppPickY.value = cfg.tcp_world[1].toFixed(1);
+          this.dom.sppPickZ.value = cfg.tcp_world[2].toFixed(1);
+          this.dom.sppPickYaw.value = '0.0';
+        }
+      });
+    }
+
+    if (this.dom.btnSppPlaceCurrent) {
+      this.dom.btnSppPlaceCurrent.addEventListener('click', () => {
+        const cfg = this.robotConfigs[this.activeSinglePpRobot];
+        if (cfg && cfg.tcp_world) {
+          this.dom.sppPlaceX.value = cfg.tcp_world[0].toFixed(1);
+          this.dom.sppPlaceY.value = cfg.tcp_world[1].toFixed(1);
+          this.dom.sppPlaceZ.value = cfg.tcp_world[2].toFixed(1);
+          this.dom.sppPlaceYaw.value = '0.0';
+        }
+      });
+    }
+
+    if (this.dom.btnSppSwap) {
+      this.dom.btnSppSwap.addEventListener('click', () => {
+        const px = this.dom.sppPickX.value;
+        const py = this.dom.sppPickY.value;
+        const pz = this.dom.sppPickZ.value;
+        const pyaw = this.dom.sppPickYaw.value;
+        this.dom.sppPickX.value = this.dom.sppPlaceX.value;
+        this.dom.sppPickY.value = this.dom.sppPlaceY.value;
+        this.dom.sppPlaceZ.value = this.dom.sppPlaceZ.value;
+        this.dom.sppPickYaw.value = this.dom.sppPlaceYaw.value;
+        this.dom.sppPlaceX.value = px;
+        this.dom.sppPlaceY.value = py;
+        this.dom.sppPlaceZ.value = pz;
+        this.dom.sppPlaceYaw.value = pyaw;
+      });
+    }
+
+    if (this.dom.btnSppClear) {
+      this.dom.btnSppClear.addEventListener('click', () => {
+        this.dom.sppPickX.value = '200.0';
+        this.dom.sppPickY.value = '100.0';
+        this.dom.sppPickZ.value = '150.0';
+        this.dom.sppPickYaw.value = '0.0';
+        this.dom.sppPlaceX.value = '150.0';
+        this.dom.sppPlaceY.value = '-100.0';
+        this.dom.sppPlaceZ.value = '180.0';
+        this.dom.sppPlaceYaw.value = '0.0';
+      });
+    }
+
+    if (this.dom.btnSppSimulate) {
+      this.dom.btnSppSimulate.addEventListener('click', () => {
+        const rid = this.activeSinglePpRobot;
+        const pickXyz = [
+          parseFloat(this.dom.sppPickX.value) || 0,
+          parseFloat(this.dom.sppPickY.value) || 0,
+          parseFloat(this.dom.sppPickZ.value) || 0,
+        ];
+        const pickYaw = parseFloat(this.dom.sppPickYaw.value) || 0;
+        const placeXyz = [
+          parseFloat(this.dom.sppPlaceX.value) || 0,
+          parseFloat(this.dom.sppPlaceY.value) || 0,
+          parseFloat(this.dom.sppPlaceZ.value) || 0,
+        ];
+        const placeYaw = parseFloat(this.dom.sppPlaceYaw.value) || 0;
+        this.dom.sppTaskStatus.textContent = 'PLANNING...';
+        this.dom.sppTaskStatus.style.color = '#00F0FF';
+        this.log(`[Single P&P] Planning autonomous trajectory for ${rid.toUpperCase()}...`, 'info');
+        this.send({
+          cmd: 'plan_single_pick_place',
+          robot_id: rid,
+          pick_xyz: pickXyz,
+          pick_yaw: pickYaw,
+          place_xyz: placeXyz,
+          place_yaw: placeYaw,
+        });
+      });
+    }
+
+    if (this.dom.btnSppExecute) {
+      this.dom.btnSppExecute.addEventListener('click', () => {
+        const rid = this.activeSinglePpRobot;
+        const pickXyz = [
+          parseFloat(this.dom.sppPickX.value) || 0,
+          parseFloat(this.dom.sppPickY.value) || 0,
+          parseFloat(this.dom.sppPickZ.value) || 0,
+        ];
+        const pickYaw = parseFloat(this.dom.sppPickYaw.value) || 0;
+        const placeXyz = [
+          parseFloat(this.dom.sppPlaceX.value) || 0,
+          parseFloat(this.dom.sppPlaceY.value) || 0,
+          parseFloat(this.dom.sppPlaceZ.value) || 0,
+        ];
+        const placeYaw = parseFloat(this.dom.sppPlaceYaw.value) || 0;
+        this.dom.sppTaskStatus.textContent = 'EXECUTING ON HARDWARE...';
+        this.dom.sppTaskStatus.style.color = '#FFB800';
+        this.log(`[Single P&P] Streaming hardware motion to ${rid.toUpperCase()}...`, 'warn');
+        this.send({
+          cmd: 'execute_single_pick_place',
+          robot_id: rid,
+          pick_xyz: pickXyz,
+          pick_yaw: pickYaw,
+          place_xyz: placeXyz,
+          place_yaw: placeYaw,
+        });
+      });
+    }
 
     // Multi-Robot Chooser Modal Listeners
     this.dom.btnCancelChoice.addEventListener('click', () => {
@@ -420,22 +632,187 @@ class WebTwinApp {
       });
     }
 
-    // Direct Single-Robot Inverse Kinematics (testGUI 1, 2, 3)
+    // Direct Single-Robot Inverse Kinematics (testGUI 1, 2, 3) with Yaw & Clipboard
+    if (this.dom.btnSingleIkCurrent) {
+      this.dom.btnSingleIkCurrent.addEventListener('click', () => {
+        const cfg = this.robotConfigs[this.activeJogRobot];
+        if (cfg && cfg.tcp_world) {
+          this.dom.singleIkX.value = cfg.tcp_world[0].toFixed(1);
+          this.dom.singleIkY.value = cfg.tcp_world[1].toFixed(1);
+          this.dom.singleIkZ.value = cfg.tcp_world[2].toFixed(1);
+          this.dom.singleIkYaw.value = '0.0';
+        }
+      });
+    }
+
+    if (this.dom.btnSingleIkClear) {
+      this.dom.btnSingleIkClear.addEventListener('click', () => {
+        this.dom.singleIkX.value = '200.0';
+        this.dom.singleIkY.value = '100.0';
+        this.dom.singleIkZ.value = '150.0';
+        this.dom.singleIkYaw.value = '0.0';
+        this.dom.singleIkFeedback.textContent = 'Inputs cleared.';
+      });
+    }
+
+    if (this.dom.btnCopyXyz) {
+      this.dom.btnCopyXyz.addEventListener('click', () => {
+        const txt = `[${this.dom.singleIkX.value}, ${this.dom.singleIkY.value}, ${this.dom.singleIkZ.value}]`;
+        this._copyToClipboard(txt, 'Target XYZ');
+      });
+    }
+
+    if (this.dom.btnCopyJoints) {
+      this.dom.btnCopyJoints.addEventListener('click', () => {
+        const q = this.currentJointAngles[this.activeJogRobot] || [];
+        const qStr = `[${q.map((v) => v.toFixed(2)).join(', ')}]`;
+        this._copyToClipboard(qStr, `${this.activeJogRobot.toUpperCase()} Joint Angles`);
+      });
+    }
+
     if (this.dom.btnSolveSingleIk) {
       this.dom.btnSolveSingleIk.addEventListener('click', () => {
         const x = parseFloat(this.dom.singleIkX.value) || 0;
         const y = parseFloat(this.dom.singleIkY.value) || 0;
         const z = parseFloat(this.dom.singleIkZ.value) || 0;
+        const yaw = parseFloat(this.dom.singleIkYaw.value) || 0;
         this.dom.singleIkFeedback.textContent = `Solving IK for ${this.activeJogRobot.toUpperCase()}...`;
         this.dom.singleIkFeedback.style.color = '#00F0FF';
-        this.log(`[Single IK] Solving IK for ${this.activeJogRobot.toUpperCase()} to target [${x}, ${y}, ${z}] mm...`, 'info');
+        this.log(`[Single IK] Solving IK for ${this.activeJogRobot.toUpperCase()} to target [${x}, ${y}, ${z}] mm (yaw ${yaw}°)...`, 'info');
         this.send({
           cmd: 'solve_single_ik',
           robot_id: this.activeJogRobot,
           target_xyz: [x, y, z],
+          target_yaw: yaw,
         });
       });
     }
+
+    // Gripper Mechanical Tuning & Controls
+    if (this.dom.btnSaveGripperLimits) {
+      this.dom.btnSaveGripperLimits.addEventListener('click', () => {
+        const openD = parseFloat(this.dom.gripperOpenLimit.value) || 90.0;
+        const closeD = parseFloat(this.dom.gripperCloseLimit.value) || 0.0;
+        const rid = this.activeJogRobot;
+        this.gripperLimits[rid] = { open: openD, close: closeD };
+        this.log(`[Gripper] Saving mechanical limits for ${rid.toUpperCase()}: Open=${openD}°, Close=${closeD}°`, 'info');
+        this.send({
+          cmd: 'set_gripper_limits',
+          robot_id: rid,
+          open_deg: openD,
+          close_deg: closeD,
+        });
+      });
+    }
+
+    if (this.dom.sliderGripperContinuous) {
+      this.dom.sliderGripperContinuous.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        if (this.dom.gripperAngleVal) this.dom.gripperAngleVal.textContent = `${val.toFixed(1)}°`;
+      });
+      this.dom.sliderGripperContinuous.addEventListener('change', (e) => {
+        const val = parseFloat(e.target.value);
+        const rid = this.activeJogRobot;
+        this.log(`[Gripper] Setting ${rid.toUpperCase()} angle to ${val.toFixed(1)}°`, 'info');
+        this.send({
+          cmd: 'set_gripper_angle',
+          robot_id: rid,
+          angle: val,
+          state: 'CUSTOM',
+        });
+      });
+    }
+
+    if (this.dom.btnGripperOpenCmd) {
+      this.dom.btnGripperOpenCmd.addEventListener('click', () => {
+        const rid = this.activeJogRobot;
+        const openD = (this.gripperLimits[rid] && this.gripperLimits[rid].open) || 90.0;
+        this.send({ cmd: 'set_gripper_angle', robot_id: rid, angle: openD, state: 'OPEN' });
+        if (this.dom.gripperStatusBadge) {
+          this.dom.gripperStatusBadge.textContent = 'OPEN';
+          this.dom.gripperStatusBadge.style.color = '#00FF9D';
+        }
+      });
+    }
+
+    if (this.dom.btnGripperCloseCmd) {
+      this.dom.btnGripperCloseCmd.addEventListener('click', () => {
+        const rid = this.activeJogRobot;
+        const closeD = (this.gripperLimits[rid] && this.gripperLimits[rid].close) || 0.0;
+        this.send({ cmd: 'set_gripper_angle', robot_id: rid, angle: closeD, state: 'CLOSED' });
+        if (this.dom.gripperStatusBadge) {
+          this.dom.gripperStatusBadge.textContent = 'CLOSED';
+          this.dom.gripperStatusBadge.style.color = '#00F0FF';
+        }
+      });
+    }
+
+    if (this.dom.btnJogResume) {
+      this.dom.btnJogResume.addEventListener('click', () => {
+        this.log(`[System] Resuming manual control for ${this.activeJogRobot.toUpperCase()}...`, 'info');
+        this.send({ cmd: 'resume_manual', robot_id: this.activeJogRobot });
+      });
+    }
+
+    if (this.dom.btnJogStop) {
+      this.dom.btnJogStop.addEventListener('click', () => {
+        this.log(`[System] Halting ${this.activeJogRobot.toUpperCase()}!`, 'error');
+        this.send({ cmd: 'emergency_stop', robot_id: this.activeJogRobot });
+      });
+    }
+
+    // Panel 4: Physical Hardware Dock Event Listeners
+    if (this.dom.btnRefreshPorts) {
+      this.dom.btnRefreshPorts.addEventListener('click', () => {
+        this.log('[Hardware] Scanning system USB/ACM serial ports...', 'info');
+        this.send({ cmd: 'get_ports' });
+      });
+    }
+
+    document.querySelectorAll('.btn-hw-connect').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const rid = btn.getAttribute('data-robot');
+        const short = rid === 'robot1' ? 'r1' : rid === 'robot2' ? 'r2' : 'r3';
+        const sel = document.getElementById(`select-${short}-port`);
+        if (sel) {
+          const port = sel.value;
+          this.log(`[Hardware] Assigning ${rid.toUpperCase()} to serial port: ${port}...`, 'info');
+          this.send({ cmd: 'set_robot_port', robot_id: rid, port: port });
+        }
+      });
+    });
+
+    document.querySelectorAll('.hw-speed-slider').forEach((slider) => {
+      slider.addEventListener('input', (e) => {
+        const rid = slider.getAttribute('data-robot');
+        const val = parseInt(e.target.value);
+        const short = rid === 'robot1' ? 'r1' : rid === 'robot2' ? 'r2' : 'r3';
+        const label = document.getElementById(`hw-${short}-speed-val`);
+        if (label) label.textContent = `Speed ${val} / 10`;
+      });
+      slider.addEventListener('change', (e) => {
+        const rid = slider.getAttribute('data-robot');
+        const val = parseInt(e.target.value);
+        this.log(`[Hardware] Setting ${rid.toUpperCase()} motion speed to level ${val}...`, 'info');
+        this.send({ cmd: 'set_robot_speed', robot_id: rid, speed: val });
+      });
+    });
+
+    document.querySelectorAll('.btn-hw-home').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const rid = btn.getAttribute('data-robot');
+        this.log(`[Hardware] Returning physical ${rid.toUpperCase()} to mechanical HOME...`, 'info');
+        this.send({ cmd: 'home_robot', robot_id: rid });
+      });
+    });
+
+    document.querySelectorAll('.btn-hw-resume').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const rid = btn.getAttribute('data-robot');
+        this.log(`[Hardware] Resuming manual control for ${rid.toUpperCase()}...`, 'info');
+        this.send({ cmd: 'resume_manual', robot_id: rid });
+      });
+    });
 
     // Manual Jogger Gripper Toggle
     this.dom.btnJogGripper.addEventListener('click', () => {
@@ -554,10 +931,68 @@ class WebTwinApp {
       this._queryReachability('pick', data.default_pick, 0.0);
       this._queryReachability('place', data.default_place, 0.0);
       this._renderJoggerSliders();
-      this.log(`Initialized 3 physical arms (R1, R2, R3). Kinematics verified.`, 'info');
+      if (data.available_ports || data.robot_hardware) {
+        this._updateHardwareDock(data.available_ports, data.robot_hardware);
+      }
+      if (data.kinematics_inspection && data.kinematics_inspection[this.activeJogRobot]) {
+        this._updateKinematicsInspection(data.kinematics_inspection[this.activeJogRobot]);
+      }
+      this.log(`Initialized 3 physical arms (R1, R2, R3). Kinematics & Hardware bridge verified.`, 'info');
     }
 
-    // 2. Reachability Result
+    // 2. Hardware Telemetry Broadcast (10 Hz daemon)
+    else if (data.type === 'telemetry_broadcast' || data.cmd === 'telemetry_broadcast') {
+      if (data.hardware) {
+        this._updateHardwareDock(data.hardware.available_ports, data.hardware.robots);
+      }
+    }
+
+    // 3. Serial Ports List Result
+    else if (data.cmd === 'ports_list') {
+      this._updateHardwareDock(data.available_ports, null);
+      this.log(`✓ Serial ports refreshed (${data.available_ports ? data.available_ports.length : 0} detected on system).`, 'info');
+    }
+
+    // 4. Set Robot Port Result
+    else if (data.cmd === 'set_port_result') {
+      if (data.success) {
+        this.log(`✓ Hardware port assigned for ${data.robot_id.toUpperCase()}: ${data.port}`, 'success');
+      } else {
+        this.log(`Failed to set port for ${data.robot_id.toUpperCase()}: ${data.error}`, 'error');
+      }
+    }
+
+    // 5. Emergency Stop Result
+    else if (data.cmd === 'emergency_stop_result') {
+      this.log(`🛑 Emergency Stop acknowledged by hardware bridge! Target: ${data.target}`, 'error');
+    }
+
+    // 6. Resume Manual Result
+    else if (data.cmd === 'resume_manual_result') {
+      this.log(`✓ Manual control resumed for ${data.target}`, 'success');
+    }
+
+    // 7. Robot Speed Result
+    else if (data.cmd === 'speed_result') {
+      this.log(`✓ Hardware speed level updated for ${data.robot_id}: Level ${data.speed}`, 'success');
+    }
+
+    // 8. Gripper Limits Result
+    else if (data.cmd === 'gripper_limits_result') {
+      this.log(`✓ Gripper mechanical limits saved for ${data.robot_id}: Open=${data.open_deg}°, Close=${data.close_deg}°`, 'success');
+    }
+
+    // 9. Gripper Angle Result
+    else if (data.cmd === 'gripper_angle_result') {
+      this.log(`✓ Gripper command sent to ${data.robot_id}: ${data.angle}° (${data.state})`, 'info');
+    }
+
+    // 10. Kinematics Inspection Result (Live 4x4 matrix, dynamic DH, geometry)
+    else if (data.cmd === 'kinematics_inspection_result') {
+      this._updateKinematicsInspection(data);
+    }
+
+    // 11. Reachability Result
     else if (data.cmd === 'reachability_result') {
       const badge = data.target_type === 'pick' ? this.dom.pickBadge : this.dom.placeBadge;
       if (data.success) {
@@ -581,7 +1016,7 @@ class WebTwinApp {
       }
     }
 
-    // 3. Trajectory Plan Result
+    // 12. Stage 3 Trajectory Plan Result
     else if (data.cmd === 'trajectory_planned') {
       this.dom.planLoadingBanner.style.display = 'none';
       if (this.dom.btnPlan) this.dom.btnPlan.disabled = false;
@@ -636,7 +1071,56 @@ class WebTwinApp {
       }
     }
 
-    // 4. Return Home Result
+    // 13. Single-Robot Pick & Place Plan Result
+    else if (data.cmd === 'single_pick_place_planned') {
+      if (data.success) {
+        this.dom.sppTaskStatus.textContent = 'PLANNED ✓';
+        this.dom.sppTaskStatus.style.color = '#00FF9D';
+        this.dom.sppTrajBadge.textContent = `READY (${data.steps.length} STEPS)`;
+        this.dom.sppTrajBadge.className = 'badge-tag';
+        this.dom.sppTrajBadge.style.color = '#00FF9D';
+        this.trajectorySteps = data.steps;
+        this.currentStepIdx = 0;
+        this.dom.timelineSlider.max = this.trajectorySteps.length - 1;
+        this.dom.timelineSlider.value = 0;
+        this.log(`[Single P&P] Autonomous trajectory planned for ${data.robot_id.toUpperCase()} (${data.steps.length} steps). Starting 3D motion preview...`, 'success');
+        this.applyStep(0);
+        this.startPlayback();
+      } else {
+        this.dom.sppTaskStatus.textContent = 'PLAN FAILED';
+        this.dom.sppTaskStatus.style.color = '#FF0055';
+        this.dom.sppTrajBadge.textContent = 'FAILED';
+        this.log(`[Single P&P] Planning failed: ${data.error}`, 'error');
+        alert(`Single Pick & Place planning error: ${data.error}`);
+      }
+    }
+
+    // 14. Single-Robot Pick & Place Execute Result
+    else if (data.cmd === 'execute_single_result') {
+      if (data.success) {
+        this.dom.sppTaskStatus.textContent = 'EXECUTING ON HARDWARE...';
+        this.dom.sppTaskStatus.style.color = '#FFB800';
+        this.dom.sppTrajBadge.textContent = 'DISPATCHED';
+        this.log(`[Single P&P] Dispatched ${data.steps_count} trajectory steps to physical ${data.robot_id.toUpperCase()}.`, 'success');
+      } else {
+        this.dom.sppTaskStatus.textContent = 'EXECUTION FAILED';
+        this.dom.sppTaskStatus.style.color = '#FF0055';
+        this.log(`[Single P&P] Execution failed: ${data.error}`, 'error');
+        alert(`Hardware execution failed: ${data.error}`);
+      }
+    }
+
+    // 15. Real Hardware Trajectory Result (Multi-Robot Stage 3)
+    else if (data.cmd === 'execute_hardware_result') {
+      if (data.success) {
+        this.log(`🚀 Real hardware trajectory successfully dispatched to ROS 2 bridge (${data.steps_count} steps)!`, 'success');
+      } else {
+        this.log(`Hardware execution error: ${data.error}`, 'error');
+        alert(`Hardware execution error: ${data.error}`);
+      }
+    }
+
+    // 16. Return Home Result
     else if (data.cmd === 'home_result') {
       this.currentJointAngles = data.joint_state;
       this._updateJointTables(data.joint_state);
@@ -657,7 +1141,7 @@ class WebTwinApp {
       this.log('✓ All robots returned to mechanical HOME positions.', 'success');
     }
 
-    // 5. Handover Inspector 3D Preview Result
+    // 17. Handover Inspector 3D Preview Result
     else if (data.cmd === 'preview_handover_result') {
       this.currentJointAngles = data.joint_state;
       this._updateJointTables(data.joint_state);
@@ -679,7 +1163,7 @@ class WebTwinApp {
       this.log(`[Handover Preview] 3D posed ${data.pair} in ${data.which} posture.`, 'info');
     }
 
-    // 6. Manual Joint Jogger Result
+    // 18. Manual Joint Jogger Result
     else if (data.cmd === 'manual_jog_result') {
       this.currentJointAngles = data.joint_state;
       this._updateJointTables(data.joint_state);
@@ -701,9 +1185,12 @@ class WebTwinApp {
         const tcp = data.frames[this.activeJogRobot].tcp_world;
         this.dom.jogTcpWorld.textContent = `X: ${tcp[0].toFixed(1)}, Y: ${tcp[1].toFixed(1)}, Z: ${tcp[2].toFixed(1)} mm`;
       }
+      if (data.kinematics_inspection) {
+        this._updateKinematicsInspection(data.kinematics_inspection);
+      }
     }
 
-    // 7. Gripper Toggle Result
+    // 19. Gripper Toggle Result
     else if (data.cmd === 'gripper_result') {
       this.activeGripperStates[data.robot_id] = data.state;
       if (this.robots[data.robot_id]) {
@@ -713,7 +1200,7 @@ class WebTwinApp {
       this.log(`[Gripper] ${data.robot_id.toUpperCase()} gripper set to ${data.state.toUpperCase()}.`, 'info');
     }
 
-    // 8. Single-Robot Direct IK Result (testGUI 1, 2, 3)
+    // 20. Single-Robot Direct IK Result (testGUI 1, 2, 3)
     else if (data.cmd === 'solve_single_ik_result') {
       if (!data.success) {
         this.dom.singleIkFeedback.textContent = data.error;
@@ -797,9 +1284,13 @@ class WebTwinApp {
     if (!angles) return;
     angles.forEach((angle, idx) => {
       const slider = document.getElementById(`jog-slider-${rid}-${idx}`);
+      const numInput = document.getElementById(`jog-num-${rid}-${idx}`);
       const valLabel = document.getElementById(`jog-val-${rid}-${idx}`);
       if (slider && document.activeElement !== slider) {
         slider.value = Math.round(angle);
+      }
+      if (numInput && document.activeElement !== numInput) {
+        numInput.value = angle.toFixed(1);
       }
       if (valLabel) {
         valLabel.textContent = `${angle.toFixed(1)}°`;
@@ -829,20 +1320,58 @@ class WebTwinApp {
           <span class="jogger-joint-name">${names[idx] || 'Joint ' + (idx + 1)}</span>
           <span class="jogger-joint-val" id="jog-val-${rid}-${idx}">${angle.toFixed(1)}°</span>
         </div>
-        <input type="range" class="jogger-slider" id="jog-slider-${rid}-${idx}"
-               min="${limits[0]}" max="${limits[1]}" step="1" value="${Math.round(angle)}">
+        <div class="jogger-row-control">
+          <input type="range" class="jogger-slider" id="jog-slider-${rid}-${idx}"
+                 min="${limits[0]}" max="${limits[1]}" step="1" value="${Math.round(angle)}">
+          <input type="number" class="jogger-num-input" id="jog-num-${rid}-${idx}"
+                 min="${limits[0]}" max="${limits[1]}" step="0.5" value="${angle.toFixed(1)}">
+        </div>
       `;
 
       const slider = row.querySelector('.jogger-slider');
+      const numInput = row.querySelector('.jogger-num-input');
+      const valLabel = row.querySelector(`#jog-val-${rid}-${idx}`);
+
+      // Two-way sync: slider input
       slider.addEventListener('input', (e) => {
         const val = parseFloat(e.target.value);
-        row.querySelector(`#jog-val-${rid}-${idx}`).textContent = `${val.toFixed(1)}°`;
+        valLabel.textContent = `${val.toFixed(1)}°`;
+        numInput.value = val.toFixed(1);
         this.send({
           cmd: 'manual_jog_joint',
           robot_id: rid,
           joint_idx: idx,
           angle_deg: val,
         });
+      });
+
+      // Two-way sync: number box input & change
+      const applyNum = (e) => {
+        let val = parseFloat(e.target.value);
+        if (isNaN(val)) return;
+        val = Math.max(limits[0], Math.min(limits[1], val));
+        valLabel.textContent = `${val.toFixed(1)}°`;
+        slider.value = Math.round(val);
+        this.send({
+          cmd: 'manual_jog_joint',
+          robot_id: rid,
+          joint_idx: idx,
+          angle_deg: val,
+        });
+      };
+      numInput.addEventListener('change', applyNum);
+      numInput.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        if (!isNaN(val) && val >= limits[0] && val <= limits[1]) {
+          valLabel.textContent = `${val.toFixed(1)}°`;
+          slider.value = Math.round(val);
+          this.send({
+            cmd: 'manual_jog_joint',
+            robot_id: rid,
+            joint_idx: idx,
+            angle_deg: val,
+          });
+        }
       });
 
       this.dom.joggerSlidersContainer.appendChild(row);
@@ -852,26 +1381,169 @@ class WebTwinApp {
     if (cfg.tcp_world) {
       this.dom.jogTcpWorld.textContent = `X: ${cfg.tcp_world[0].toFixed(1)}, Y: ${cfg.tcp_world[1].toFixed(1)}, Z: ${cfg.tcp_world[2].toFixed(1)} mm`;
     }
+
+    // Request Kinematics Inspection (4x4 matrix, dynamic DH)
+    this.send({
+      cmd: 'get_kinematics_inspection',
+      robot_id: rid,
+      q_deg: currentQ,
+    });
   }
 
   _renderDhTable() {
-    if (!this.dom.dhParamsTbody) return;
-    const cfg = this.robotConfigs[this.activeJogRobot];
-    if (!cfg || !cfg.dh_table) return;
-    this.dom.dhParamsTbody.innerHTML = '';
-    cfg.dh_table.forEach((row) => {
-      const tr = document.createElement('tr');
-      tr.style.borderBottom = '1px solid rgba(255,255,255,0.08)';
-      tr.innerHTML = `
-        <td style="padding:4px 6px; font-weight:700; color:var(--robot1-cyan);">${row.joint}</td>
-        <td style="padding:4px 6px;">${row.theta_offset_deg}°</td>
-        <td style="padding:4px 6px;">${row.d_mm}</td>
-        <td style="padding:4px 6px;">${row.a_mm}</td>
-        <td style="padding:4px 6px;">${row.alpha_deg}°</td>
-        <td style="padding:4px 6px; color:var(--text-muted);">${row.limit_min_deg}° / ${row.limit_max_deg}°</td>
-      `;
-      this.dom.dhParamsTbody.appendChild(tr);
+    this.send({
+      cmd: 'get_kinematics_inspection',
+      robot_id: this.activeJogRobot,
+      q_deg: this.currentJointAngles[this.activeJogRobot],
     });
+  }
+
+  _updateKinematicsInspection(data) {
+    if (!data || !data.success) return;
+    this.kinematicsInspection[data.robot_id] = data;
+
+    // Only update DOM if this belongs to the active jogger robot
+    if (data.robot_id !== this.activeJogRobot) return;
+
+    // 1. 4x4 Homogeneous Transformation Matrix Display
+    if (this.dom.matrixGridDisplay && data.transformation_matrix) {
+      this.dom.matrixGridDisplay.innerHTML = '';
+      for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 4; c++) {
+          const cell = document.createElement('div');
+          const isTrans = c === 3 && r < 3;
+          cell.className = 'matrix-cell' + (isTrans ? ' translation-cell' : '');
+          const val = data.transformation_matrix[r][c];
+          cell.textContent = Number(val).toFixed(2);
+          cell.title = `T0n[${r},${c}] = ${val}`;
+          this.dom.matrixGridDisplay.appendChild(cell);
+        }
+      }
+    }
+
+    // 2. Dynamic DH Table with Live Theta Updates
+    if (this.dom.dhParamsTbody && data.dh_table) {
+      this.dom.dhParamsTbody.innerHTML = '';
+      data.dh_table.forEach((row) => {
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid rgba(255,255,255,0.08)';
+        tr.innerHTML = `
+          <td style="padding:4px 6px; font-weight:700; color:var(--robot1-cyan);">${row.joint}</td>
+          <td style="padding:4px 6px;">${row.a_mm}</td>
+          <td style="padding:4px 6px;">${row.d_mm}</td>
+          <td style="padding:4px 6px;">${row.alpha_deg}°</td>
+          <td style="padding:4px 6px; color:var(--robot1-cyan); font-weight:700;">${row.theta_deg}°</td>
+        `;
+        this.dom.dhParamsTbody.appendChild(tr);
+      });
+    }
+
+    // 3. System Geometry Breakdown
+    if (this.dom.geometryBreakdown && data.geometry) {
+      const g = data.geometry;
+      this.dom.geometryBreakdown.innerHTML = `
+        <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+          <span>DOF: <strong style="color:var(--text-main);">${g.dof}-Axis</strong></span>
+          <span>Max Reach: <strong style="color:var(--status-safe);">${g.reach_radius_mm} mm</strong></span>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+          <span>Base d0: <strong>${g.base_height_mm} mm</strong></span>
+          <span>Humerus a2: <strong>${g.link1_mm} mm</strong></span>
+        </div>
+        <div style="display:flex; justify-content:space-between;">
+          <span>Forearm d3: <strong>${g.link2_mm} mm</strong></span>
+          <span>Wrist a5/d6: <strong>${g.link3_mm}/${g.link4_mm} mm</strong></span>
+        </div>
+      `;
+    }
+  }
+
+  _updateHardwareDock(availablePorts, robots) {
+    if (availablePorts && Array.isArray(availablePorts)) {
+      this.hardwareState.available_ports = availablePorts;
+      ['robot1', 'robot2', 'robot3'].forEach((rid) => {
+        const short = rid === 'robot1' ? 'r1' : rid === 'robot2' ? 'r2' : 'r3';
+        const sel = document.getElementById(`select-${short}-port`);
+        if (sel) {
+          const currentVal = sel.value;
+          sel.innerHTML = '';
+          const defaultPort = `/dev/${rid}`;
+          const allOptions = Array.from(new Set([defaultPort, ...availablePorts]));
+          allOptions.forEach((p) => {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.textContent = p;
+            if (p === currentVal) opt.selected = true;
+            sel.appendChild(opt);
+          });
+        }
+      });
+    }
+
+    if (robots && typeof robots === 'object') {
+      this.hardwareState.robots = robots;
+      Object.entries(robots).forEach(([rid, rdata]) => {
+        const short = rid === 'robot1' ? 'r1' : rid === 'robot2' ? 'r2' : 'r3';
+
+        // Update connection badge
+        const connBadge = document.getElementById(`hw-${short}-conn-badge`);
+        if (connBadge) {
+          if (rdata.port_connected) {
+            connBadge.textContent = rdata.assigned_port ? `CONNECTED (${rdata.assigned_port})` : 'CONNECTED';
+            connBadge.className = 'hw-status-badge hw-status-connected';
+          } else {
+            connBadge.textContent = 'DISCONNECTED';
+            connBadge.className = 'hw-status-badge hw-status-disconnected';
+          }
+        }
+
+        // Update mode badge
+        const modeBadge = document.getElementById(`hw-${short}-mode-badge`);
+        if (modeBadge) {
+          const mode = (rdata.control_mode || 'MANUAL').toUpperCase();
+          modeBadge.textContent = mode;
+          if (mode === 'HALTED') {
+            modeBadge.className = 'hw-status-badge hw-status-disconnected';
+          } else if (mode === 'TRAJECTORY') {
+            modeBadge.className = 'hw-status-badge hw-status-connecting';
+          } else {
+            modeBadge.className = 'hw-status-badge hw-status-connected';
+          }
+        }
+
+        // Update speed label and slider
+        const speedVal = document.getElementById(`hw-${short}-speed-val`);
+        if (speedVal && rdata.speed !== undefined) {
+          speedVal.textContent = `Speed ${rdata.speed} / 10`;
+          const slider = document.querySelector(`.hw-speed-slider[data-robot="${rid}"]`);
+          if (slider && document.activeElement !== slider) {
+            slider.value = rdata.speed;
+          }
+        }
+      });
+    }
+
+    if (this.dom.hwRosStatus) {
+      this.dom.hwRosStatus.textContent = 'ROS 2 Core Bridge: ACTIVE';
+      this.dom.hwRosStatus.style.color = '#00FF9D';
+    }
+  }
+
+  _copyToClipboard(text, label = 'Data') {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        () => this.log(`📋 Copied ${label} to clipboard: ${text}`, 'success'),
+        (err) => this.log(`Clipboard error: ${err}`, 'error')
+      );
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      this.log(`📋 Copied ${label} to clipboard: ${text}`, 'success');
+    }
   }
 
   _getCurrentTargetKey() {
