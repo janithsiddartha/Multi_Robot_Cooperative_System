@@ -36,6 +36,10 @@ class WebTwinApp {
     // Active Pending Plan Request
     this.pendingPlan = null;
 
+    // Handover Strategy Mode ('auto' or 'manual')
+    this.handoverMode = 'auto';
+    this.handoverPairs = {};
+
     this._initDomReferences();
     this._initEventListeners();
     this._connectWebSocket();
@@ -130,12 +134,35 @@ class WebTwinApp {
       hoCoords: document.getElementById('ho-coords'),
       hoMode: document.getElementById('ho-mode'),
       hoStandoff: document.getElementById('ho-standoff'),
+      badgeInspectorStatus: document.getElementById('badge-inspector-status'),
+      hoStatusBanner: document.getElementById('ho-status-banner'),
+      hoStatusBannerText: document.getElementById('ho-status-banner-text'),
+      btnRecomputeHandover: document.getElementById('btn-recompute-handover'),
+      btnReloadHoCache: document.getElementById('btn-reload-ho-cache'),
+      btnClearHoCache: document.getElementById('btn-clear-ho-cache'),
+      btnRecompPair12: document.getElementById('btn-recomp-pair-12'),
+      btnRecompPair23: document.getElementById('btn-recomp-pair-23'),
+      btnRecompPair31: document.getElementById('btn-recomp-pair-31'),
 
       // Handover Inspector Controls
       selectInspectorPair: document.getElementById('select-inspector-pair'),
       btnInspectHandover: document.getElementById('btn-inspect-handover'),
       btnInspectPre: document.getElementById('btn-inspect-pre'),
       btnInspectHome: document.getElementById('btn-inspect-home'),
+
+      // Stage 3 Handover Strategy elements
+      badgeStage3HoStatus: document.getElementById('badge-stage3-ho-status'),
+      stage3HoNote: document.getElementById('stage3-ho-note'),
+
+      // Fleet Hardware Bar (Top Strip)
+      selectFleetPortR1: document.getElementById('select-fleet-r1-port'),
+      selectFleetPortR2: document.getElementById('select-fleet-r2-port'),
+      selectFleetPortR3: document.getElementById('select-fleet-r3-port'),
+      badgeFleetR1: document.getElementById('badge-fleet-r1'),
+      badgeFleetR2: document.getElementById('badge-fleet-r2'),
+      badgeFleetR3: document.getElementById('badge-fleet-r3'),
+      btnFleetScanPorts: document.getElementById('btn-fleet-scan-ports'),
+      btnNudgeXyz: document.querySelectorAll('.btn-nudge-xyz'),
 
       // Manual Joint Jogger (Robot GUI 1, 2, 3)
       joggerPills: document.querySelectorAll('.jogger-pill:not(.single-robot-pill)'),
@@ -577,8 +604,14 @@ class WebTwinApp {
         this.pendingPlan.chosen_pick_robot = selectedPick.getAttribute('data-robot');
         this.pendingPlan.chosen_place_robot = selectedPlace.getAttribute('data-robot');
         this.dom.planLoadingBanner.style.display = 'flex';
-        this.dom.planLoadingTitle.textContent = 'Generating Corridors...';
-        this.dom.planLoadingSubtitle.textContent = `Planning ${this.pendingPlan.chosen_pick_robot.toUpperCase()} -> ${this.pendingPlan.chosen_place_robot.toUpperCase()} trajectory...`;
+        const isSingle = this.pendingPlan.chosen_pick_robot === this.pendingPlan.chosen_place_robot;
+        if (isSingle) {
+          this.dom.planLoadingTitle.textContent = 'Planning Single Robot Motion...';
+          this.dom.planLoadingSubtitle.textContent = `Planning direct ${this.pendingPlan.chosen_pick_robot.toUpperCase()} trajectory (no handover required)...`;
+        } else {
+          this.dom.planLoadingTitle.textContent = 'Planning Multi-Robot Trajectory...';
+          this.dom.planLoadingSubtitle.textContent = `Planning collision-free ${this.pendingPlan.chosen_pick_robot.toUpperCase()} ➔ ${this.pendingPlan.chosen_place_robot.toUpperCase()} synchronized trajectory...`;
+        }
         this.send(this.pendingPlan);
         this.log(
           `Operator Chooser: Assigned Pick to ${this.pendingPlan.chosen_pick_robot}, Place to ${this.pendingPlan.chosen_place_robot}.`,
@@ -612,8 +645,32 @@ class WebTwinApp {
         this.activeJogRobot = pill.getAttribute('data-robot');
         this._renderJoggerSliders();
         this._renderDhTable();
+        this._syncJogSpeedSlider();
       });
     });
+
+    // Speed Sliders (Stage 3 & Jogger)
+    const stage3SpeedSlider = document.getElementById('stage3-speed-slider');
+    const stage3SpeedVal = document.getElementById('stage3-speed-val');
+    if (stage3SpeedSlider) {
+      stage3SpeedSlider.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value, 10);
+        if (stage3SpeedVal) stage3SpeedVal.textContent = `LEVEL ${val} / 10`;
+        this.send({ cmd: 'set_speed', robot_id: 'all', speed: val });
+        this.log(`Set global motion speed to Level ${val}/10`, 'info');
+      });
+    }
+
+    const jogSpeedSlider = document.getElementById('jog-speed-slider');
+    const jogSpeedVal = document.getElementById('jog-speed-val');
+    if (jogSpeedSlider) {
+      jogSpeedSlider.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value, 10);
+        if (jogSpeedVal) jogSpeedVal.textContent = `LEVEL ${val} / 10`;
+        this.send({ cmd: 'set_speed', robot_id: this.activeJogRobot, speed: val });
+        this.log(`Set ${this.activeJogRobot.toUpperCase()} speed to Level ${val}/10`, 'info');
+      });
+    }
 
     // Single-Robot Subtabs (Sliders / Direct IK / DH Parameters from testGUI 1, 2, 3)
     if (this.dom.jogSubtabBtns) {
@@ -687,6 +744,27 @@ class WebTwinApp {
         });
       });
     }
+
+    // Cartesian Step Nudge Buttons (±10 mm on X, Y, Z)
+    document.querySelectorAll('.btn-nudge-xyz').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const axis = btn.getAttribute('data-axis');
+        const dir = parseFloat(btn.getAttribute('data-dir')) || 1;
+        const step = 10.0 * dir;
+        let targetInput = null;
+        if (axis === 'x') targetInput = this.dom.singleIkX;
+        else if (axis === 'y') targetInput = this.dom.singleIkY;
+        else if (axis === 'z') targetInput = this.dom.singleIkZ;
+
+        if (targetInput) {
+          const cur = parseFloat(targetInput.value) || 0;
+          targetInput.value = (cur + step).toFixed(1);
+          if (this.dom.btnSolveSingleIk) {
+            this.dom.btnSolveSingleIk.click();
+          }
+        }
+      });
+    });
 
     // Gripper Mechanical Tuning & Controls
     if (this.dom.btnSaveGripperLimits) {
@@ -814,50 +892,179 @@ class WebTwinApp {
       });
     });
 
-    // Manual Jogger Gripper Toggle
-    this.dom.btnJogGripper.addEventListener('click', () => {
-      const cur = this.activeGripperStates[this.activeJogRobot] || 'open';
-      const nextState = cur === 'open' ? 'close' : 'open';
-      this.send({
-        cmd: 'toggle_gripper',
-        robot_id: this.activeJogRobot,
-        state: nextState,
+    // Fleet Hardware Bar (Top Strip) Event Listeners
+    document.querySelectorAll('.btn-fleet-connect').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const rid = btn.getAttribute('data-robot');
+        const short = rid === 'robot1' ? 'r1' : rid === 'robot2' ? 'r2' : 'r3';
+        const sel = document.getElementById(`select-fleet-${short}-port`);
+        if (sel) {
+          const port = sel.value;
+          this.log(`[Fleet Hardware] Assigning ${rid.toUpperCase()} to serial port: ${port}...`, 'info');
+          this.send({ cmd: 'set_robot_port', robot_id: rid, port: port });
+        }
       });
     });
+
+    document.querySelectorAll('.btn-fleet-disconnect').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const rid = btn.getAttribute('data-robot');
+        this.log(`[Fleet Hardware] Disconnecting ${rid.toUpperCase()}...`, 'warn');
+        this.send({ cmd: 'disconnect_robot_port', robot_id: rid });
+      });
+    });
+
+    if (this.dom.btnFleetScanPorts) {
+      this.dom.btnFleetScanPorts.addEventListener('click', () => {
+        this.log('[Fleet Hardware] Scanning system USB/ACM serial ports...', 'info');
+        this.send({ cmd: 'get_ports' });
+      });
+    }
+
+    // Manual Jogger Gripper Toggle
+    if (this.dom.btnJogGripper) {
+      this.dom.btnJogGripper.addEventListener('click', () => {
+        const cur = this.activeGripperStates[this.activeJogRobot] || 'open';
+        const nextState = cur === 'open' ? 'close' : 'open';
+        this.send({
+          cmd: 'toggle_gripper',
+          robot_id: this.activeJogRobot,
+          state: nextState,
+        });
+      });
+    }
 
     // Manual Jogger Home Selected Robot
-    this.dom.btnJogHome.addEventListener('click', () => {
-      this.log(`[Manual Jogger] Resetting ${this.activeJogRobot.toUpperCase()} to mechanical HOME...`, 'info');
-      this.send({
-        cmd: 'home_arm',
-        robot_id: this.activeJogRobot,
+    if (this.dom.btnJogHome) {
+      this.dom.btnJogHome.addEventListener('click', () => {
+        this.log(`[Manual Jogger] Resetting ${this.activeJogRobot.toUpperCase()} to mechanical HOME...`, 'info');
+        this.send({
+          cmd: 'home_arm',
+          robot_id: this.activeJogRobot,
+        });
       });
+    }
+
+    // Handover Strategy Mode Radios (Inspector & Stage 3)
+    document.querySelectorAll('input[name="inspector-handover-mode"]').forEach((r) => {
+      r.addEventListener('change', (e) => this.setHandoverMode(e.target.value));
+    });
+    document.querySelectorAll('input[name="stage3-handover-mode"]').forEach((r) => {
+      r.addEventListener('change', (e) => this.setHandoverMode(e.target.value));
     });
 
-    // Handover Inspector Buttons (like Stage 3 Test 2 GUI)
-    this.dom.btnInspectHandover.addEventListener('click', () => {
-      const pair = this.dom.selectInspectorPair.value;
-      this.log(`[Handover Inspector] Requesting 3D Mated Handover posture for ${pair}...`, 'info');
-      this.send({
-        cmd: 'preview_handover',
-        pair: pair,
-        which: 'handover',
+    // Handover Inspector Controls (like Stage 3 Test 2 GUI)
+    if (this.dom.selectInspectorPair) {
+      this.dom.selectInspectorPair.addEventListener('change', () => {
+        this._refreshHandoverCard();
       });
-    });
+    }
 
-    this.dom.btnInspectPre.addEventListener('click', () => {
-      const pair = this.dom.selectInspectorPair.value;
-      this.log(`[Handover Inspector] Requesting Pre-Handover Stance for ${pair}...`, 'info');
-      this.send({
-        cmd: 'preview_handover',
-        pair: pair,
-        which: 'pre_handover',
+    if (this.dom.btnReloadHoCache) {
+      this.dom.btnReloadHoCache.addEventListener('click', () => {
+        this.log('[CACHE RELOAD] Reloading handover cache from disk...', 'info');
+        this.send({ cmd: 'reload_handover_cache' });
       });
-    });
+    }
 
-    this.dom.btnInspectHome.addEventListener('click', () => {
-      this.send({ cmd: 'home_all' });
-    });
+    if (this.dom.btnClearHoCache) {
+      this.dom.btnClearHoCache.addEventListener('click', () => {
+        if (!confirm('Clear cached handover poses for this configuration?')) return;
+        this.log('🗑️ Clearing handover cache for this configuration...', 'warning');
+        this.send({ cmd: 'clear_handover_cache' });
+      });
+    }
+
+    const recomputePair = (pair, btn) => {
+      if (!btn) return;
+      btn.disabled = true;
+      const oldHtml = btn.innerHTML;
+      btn.innerHTML = '<span class="spinner-neon" style="width:10px;height:10px;border-width:1.5px;display:inline-block;"></span>';
+      this.log(`⚡ Starting Top-of-Workspace Recomputation for ${pair}...`, 'info');
+      this.send({ cmd: 'recompute_handover', pair: pair });
+    };
+
+    if (this.dom.btnRecompPair12) {
+      this.dom.btnRecompPair12.addEventListener('click', () => recomputePair('robot1_robot2', this.dom.btnRecompPair12));
+    }
+    if (this.dom.btnRecompPair23) {
+      this.dom.btnRecompPair23.addEventListener('click', () => recomputePair('robot2_robot3', this.dom.btnRecompPair23));
+    }
+    if (this.dom.btnRecompPair31) {
+      this.dom.btnRecompPair31.addEventListener('click', () => recomputePair('robot3_robot1', this.dom.btnRecompPair31));
+    }
+
+    if (this.dom.btnRecomputeHandover) {
+      this.dom.btnRecomputeHandover.addEventListener('click', () => {
+        this.dom.btnRecomputeHandover.disabled = true;
+        this.dom.btnRecomputeHandover.innerHTML = '<span class="spinner-neon" style="width:12px;height:12px;border-width:2px;display:inline-block;margin-right:6px;"></span> ⏳ Solving All...';
+        this.log('⚡ Starting Stage 3 Test 2 Handover Recomputation (Top-of-Workspace Only) for all pairs...', 'info');
+        this.send({ cmd: 'recompute_handover' });
+      });
+    }
+
+    // Handover Inspector Posing Buttons
+    if (this.dom.btnInspectHandover && this.dom.selectInspectorPair) {
+      this.dom.btnInspectHandover.addEventListener('click', () => {
+        const pair = this.dom.selectInspectorPair.value;
+        this.log(`[Handover Inspector] Requesting 3D ${this.handoverMode === 'manual' ? 'MANUAL ' : ''}Mated Handover posture for ${pair}...`, 'info');
+        this.send({
+          cmd: 'preview_handover',
+          pair: pair,
+          which: 'handover',
+          mode: this.handoverMode,
+        });
+      });
+    }
+
+    if (this.dom.btnInspectPre && this.dom.selectInspectorPair) {
+      this.dom.btnInspectPre.addEventListener('click', () => {
+        const pair = this.dom.selectInspectorPair.value;
+        this.log(`[Handover Inspector] Requesting ${this.handoverMode === 'manual' ? 'MANUAL ' : ''}Pre-Handover Stance for ${pair}...`, 'info');
+        this.send({
+          cmd: 'preview_handover',
+          pair: pair,
+          which: 'pre_handover',
+          mode: this.handoverMode,
+        });
+      });
+    }
+
+    if (this.dom.btnInspectHome) {
+      this.dom.btnInspectHome.addEventListener('click', () => {
+        this.send({ cmd: 'home_all' });
+      });
+    }
+  }
+
+  setHandoverMode(mode) {
+    this.handoverMode = mode;
+    document.querySelectorAll(`input[name="inspector-handover-mode"][value="${mode}"]`).forEach((r) => { r.checked = true; });
+    document.querySelectorAll(`input[name="stage3-handover-mode"][value="${mode}"]`).forEach((r) => { r.checked = true; });
+    this._refreshHandoverCard();
+    this._refreshStage3HandoverBadge();
+    this.log(`Handover strategy set to: ${mode === 'auto' ? 'Auto Kinematics (Top-of-WS)' : 'Manual Override (handover.yaml)'}`, 'info');
+  }
+
+  _refreshStage3HandoverBadge() {
+    if (!this.dom.badgeStage3HoStatus) return;
+    if (this.handoverMode === 'manual') {
+      this.dom.badgeStage3HoStatus.textContent = 'MANUAL OVERRIDE';
+      this.dom.badgeStage3HoStatus.style.background = 'rgba(255, 184, 0, 0.15)';
+      this.dom.badgeStage3HoStatus.style.color = '#FFB800';
+      this.dom.badgeStage3HoStatus.style.borderColor = 'rgba(255, 184, 0, 0.3)';
+      if (this.dom.stage3HoNote) {
+        this.dom.stage3HoNote.textContent = 'Manual: Static postures from handover.yaml will be used for execution.';
+      }
+    } else {
+      this.dom.badgeStage3HoStatus.textContent = 'AUTO (TOP-OF-WS)';
+      this.dom.badgeStage3HoStatus.style.background = 'rgba(0, 255, 157, 0.15)';
+      this.dom.badgeStage3HoStatus.style.color = '#00FF9D';
+      this.dom.badgeStage3HoStatus.style.borderColor = 'rgba(0, 255, 157, 0.3)';
+      if (this.dom.stage3HoNote) {
+        this.dom.stage3HoNote.textContent = 'Auto: Top-of-workspace corridor (falls back to manual if no auto solution).';
+      }
+    }
   }
 
   _connectWebSocket() {
@@ -919,8 +1126,10 @@ class WebTwinApp {
     if (data.type === 'initial_state') {
       this.robotConfigs = data.robots;
       this.currentJointAngles = data.current_q;
+      this.handoverPairs = data.handover_pairs || {};
       this._setupRobots(data.robots);
-      this._updateHandoverCard(data.handover_poses);
+      this._refreshHandoverCard();
+      this._refreshStage3HandoverBadge();
       if (data.clearance) {
         this.laser.update(
           data.clearance.min_distance_mm,
@@ -934,8 +1143,12 @@ class WebTwinApp {
       if (data.available_ports || data.robot_hardware) {
         this._updateHardwareDock(data.available_ports, data.robot_hardware);
       }
-      if (data.kinematics_inspection && data.kinematics_inspection[this.activeJogRobot]) {
-        this._updateKinematicsInspection(data.kinematics_inspection[this.activeJogRobot]);
+      if (data.kinematics_inspection) {
+        if (data.kinematics_inspection[this.activeJogRobot]) {
+          this._updateKinematicsInspection(data.kinematics_inspection[this.activeJogRobot]);
+        } else if (data.kinematics_inspection.robot_id === this.activeJogRobot) {
+          this._updateKinematicsInspection(data.kinematics_inspection);
+        }
       }
       this.log(`Initialized 3 physical arms (R1, R2, R3). Kinematics & Hardware bridge verified.`, 'info');
     }
@@ -944,6 +1157,36 @@ class WebTwinApp {
     else if (data.type === 'telemetry_broadcast' || data.cmd === 'telemetry_broadcast') {
       if (data.hardware) {
         this._updateHardwareDock(data.hardware.available_ports, data.hardware.robots);
+      }
+      if (data.joint_state && !this.isSimulating) {
+        this.currentJointAngles = data.joint_state;
+        this._updateJointTables(data.joint_state);
+        this._syncJoggerSliders(data.joint_state);
+      }
+      if (data.frames && !this.isSimulating) {
+        for (const [rid, frames] of Object.entries(data.frames)) {
+          if (this.robots[rid]) {
+            const gState = (data.grippers && data.grippers[rid]) || this.activeGripperStates[rid] || 'open';
+            this.robots[rid].updatePose(frames.frames_world, frames.tcp_R, gState);
+          }
+        }
+        if (data.frames[this.activeJogRobot] && this.dom.jogTcpWorld) {
+          const frameData = data.frames[this.activeJogRobot];
+          const tcp = frameData.tcp_world;
+          const rpy = frameData.tcp_rpy_deg;
+          if (rpy && rpy.length === 3) {
+            this.dom.jogTcpWorld.textContent = `X: ${tcp[0].toFixed(1)}, Y: ${tcp[1].toFixed(1)}, Z: ${tcp[2].toFixed(1)} mm | R: ${rpy[0].toFixed(1)}°, P: ${rpy[1].toFixed(1)}°, Y: ${rpy[2].toFixed(1)}°`;
+          } else {
+            this.dom.jogTcpWorld.textContent = `X: ${tcp[0].toFixed(1)}, Y: ${tcp[1].toFixed(1)}, Z: ${tcp[2].toFixed(1)} mm`;
+          }
+        }
+      }
+      if (data.clearance && !this.isSimulating) {
+        this.laser.update(
+          data.clearance.min_distance_mm,
+          data.clearance.endpoint_a,
+          data.clearance.endpoint_b
+        );
       }
     }
 
@@ -957,8 +1200,31 @@ class WebTwinApp {
     else if (data.cmd === 'set_port_result') {
       if (data.success) {
         this.log(`✓ Hardware port assigned for ${data.robot_id.toUpperCase()}: ${data.port}`, 'success');
+        if (!this.hardwareState.robots[data.robot_id]) {
+          this.hardwareState.robots[data.robot_id] = {};
+        }
+        this.hardwareState.robots[data.robot_id].connected = true;
+        this.hardwareState.robots[data.robot_id].port_connected = true;
+        this.hardwareState.robots[data.robot_id].assigned_port = data.port;
+        this._updateHardwareDock(null, this.hardwareState.robots);
       } else {
         this.log(`Failed to set port for ${data.robot_id.toUpperCase()}: ${data.error}`, 'error');
+      }
+    }
+
+    // 4b. Disconnect Robot Port Result
+    else if (data.cmd === 'disconnect_port_result') {
+      if (data.success) {
+        this.log(`✓ Hardware port disconnected for ${data.robot_id.toUpperCase()}`, 'info');
+        if (!this.hardwareState.robots[data.robot_id]) {
+          this.hardwareState.robots[data.robot_id] = {};
+        }
+        this.hardwareState.robots[data.robot_id].connected = false;
+        this.hardwareState.robots[data.robot_id].port_connected = false;
+        this.hardwareState.robots[data.robot_id].assigned_port = '';
+        this._updateHardwareDock(null, this.hardwareState.robots);
+      } else {
+        this.log(`Failed to disconnect port for ${data.robot_id.toUpperCase()}: ${data.error}`, 'error');
       }
     }
 
@@ -1143,6 +1409,11 @@ class WebTwinApp {
 
     // 17. Handover Inspector 3D Preview Result
     else if (data.cmd === 'preview_handover_result') {
+      if (!data.success) {
+        this.log(`⚠️ Handover Preview: ${data.error}`, 'error');
+        alert(`Handover Preview: ${data.error}`);
+        return;
+      }
       this.currentJointAngles = data.joint_state;
       this._updateJointTables(data.joint_state);
       for (const [rid, frames] of Object.entries(data.frames)) {
@@ -1160,7 +1431,38 @@ class WebTwinApp {
       this.dom.hoCoords.textContent = `[${data.handover_xyz.join(', ')}] mm`;
       this.dom.hoMode.textContent = `${data.approach_mode} (${data.standoff_mm}mm)`;
       this.dom.hoStandoff.textContent = `${data.standoff_mm} mm (Clearance: ${data.clearance.min_distance_mm} mm)`;
-      this.log(`[Handover Preview] 3D posed ${data.pair} in ${data.which} posture.`, 'info');
+      this.log(`[Handover Preview] 3D posed ${data.pair} in ${data.mode === 'manual' ? 'MANUAL ' : ''}${data.which} posture.`, 'info');
+    }
+
+    // 17b. Handover Cache Reloaded Result
+    else if (data.cmd === 'handover_cache_reloaded') {
+      this.handoverPairs = data.handover_pairs;
+      this._refreshHandoverCard();
+      this.log(`✓ Handover cache reloaded from disk (${data.count} auto-handover solutions present).`, 'success');
+    }
+
+    // 17c. Handover Cache Cleared Result
+    else if (data.cmd === 'handover_cache_cleared') {
+      this.handoverPairs = data.handover_pairs;
+      this._refreshHandoverCard();
+      this.log('🗑️ Handover cache cleared for active configuration.', 'warning');
+    }
+
+    // 17d. Handover Recomputed Result
+    else if (data.cmd === 'handover_recomputed') {
+      if (this.dom.btnRecomputeHandover) {
+        this.dom.btnRecomputeHandover.disabled = false;
+        this.dom.btnRecomputeHandover.innerHTML = '<i class="fa fa-bolt"></i> ⚡ Recompute All (Top-WS)';
+      }
+      [this.dom.btnRecompPair12, this.dom.btnRecompPair23, this.dom.btnRecompPair31].forEach((btn, i) => {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = `⚡ ${['1-2', '2-3', '3-1'][i]}`;
+        }
+      });
+      this.handoverPairs = data.handover_pairs;
+      this._refreshHandoverCard();
+      this.log(`✓ Handover recomputation complete! ${data.count} pairs saved to cache.`, 'success');
     }
 
     // 18. Manual Joint Jogger Result
@@ -1181,9 +1483,15 @@ class WebTwinApp {
           data.clearance.endpoint_b
         );
       }
-      if (data.frames[this.activeJogRobot]) {
-        const tcp = data.frames[this.activeJogRobot].tcp_world;
-        this.dom.jogTcpWorld.textContent = `X: ${tcp[0].toFixed(1)}, Y: ${tcp[1].toFixed(1)}, Z: ${tcp[2].toFixed(1)} mm`;
+      if (data.frames && data.frames[this.activeJogRobot]) {
+        const frameData = data.frames[this.activeJogRobot];
+        const tcp = frameData.tcp_world;
+        const rpy = frameData.tcp_rpy_deg;
+        if (rpy && rpy.length === 3) {
+          this.dom.jogTcpWorld.textContent = `X: ${tcp[0].toFixed(1)}, Y: ${tcp[1].toFixed(1)}, Z: ${tcp[2].toFixed(1)} mm | R: ${rpy[0].toFixed(1)}°, P: ${rpy[1].toFixed(1)}°, Y: ${rpy[2].toFixed(1)}°`;
+        } else {
+          this.dom.jogTcpWorld.textContent = `X: ${tcp[0].toFixed(1)}, Y: ${tcp[1].toFixed(1)}, Z: ${tcp[2].toFixed(1)} mm`;
+        }
       }
       if (data.kinematics_inspection) {
         this._updateKinematicsInspection(data.kinematics_inspection);
@@ -1196,7 +1504,13 @@ class WebTwinApp {
       if (this.robots[data.robot_id]) {
         this.robots[data.robot_id].setGripperState(data.state);
       }
-      this.dom.btnJogGripper.innerHTML = `<i class="fa fa-hand"></i> Toggle Gripper (${data.state.toUpperCase()})`;
+      if (this.dom.btnJogGripper) {
+        this.dom.btnJogGripper.innerHTML = `<i class="fa fa-hand"></i> Toggle Gripper (${data.state.toUpperCase()})`;
+      }
+      if (this.dom.gripperStatusBadge) {
+        this.dom.gripperStatusBadge.textContent = data.state.toUpperCase();
+        this.dom.gripperStatusBadge.style.color = data.state.toUpperCase() === 'OPEN' ? '#00FF9D' : '#00F0FF';
+      }
       this.log(`[Gripper] ${data.robot_id.toUpperCase()} gripper set to ${data.state.toUpperCase()}.`, 'info');
     }
 
@@ -1225,9 +1539,15 @@ class WebTwinApp {
           data.clearance.endpoint_b
         );
       }
-      if (data.frames[this.activeJogRobot]) {
-        const tcp = data.frames[this.activeJogRobot].tcp_world;
-        this.dom.jogTcpWorld.textContent = `X: ${tcp[0].toFixed(1)}, Y: ${tcp[1].toFixed(1)}, Z: ${tcp[2].toFixed(1)} mm`;
+      if (data.frames && data.frames[this.activeJogRobot]) {
+        const frameData = data.frames[this.activeJogRobot];
+        const tcp = frameData.tcp_world;
+        const rpy = frameData.tcp_rpy_deg;
+        if (rpy && rpy.length === 3) {
+          this.dom.jogTcpWorld.textContent = `X: ${tcp[0].toFixed(1)}, Y: ${tcp[1].toFixed(1)}, Z: ${tcp[2].toFixed(1)} mm | R: ${rpy[0].toFixed(1)}°, P: ${rpy[1].toFixed(1)}°, Y: ${rpy[2].toFixed(1)}°`;
+        } else {
+          this.dom.jogTcpWorld.textContent = `X: ${tcp[0].toFixed(1)}, Y: ${tcp[1].toFixed(1)}, Z: ${tcp[2].toFixed(1)} mm`;
+        }
       }
       this.dom.singleIkFeedback.textContent = `✓ Solved! Target [${data.target_xyz.join(', ')}] mm | Error: ${data.error_mm} mm`;
       this.dom.singleIkFeedback.style.color = '#00FF9D';
@@ -1251,14 +1571,99 @@ class WebTwinApp {
     this._renderDhTable();
   }
 
-  _updateHandoverCard(handoverPoses) {
-    const p12 = handoverPoses['robot3_robot1'] || handoverPoses['robot1_robot2'];
-    if (p12) {
-      this.dom.hoCoords.textContent = `[${p12.handover_position_world.join(', ')}] mm`;
-      this.dom.hoMode.textContent = `${p12.approach_mode} (${p12.standoff_distance_mm}mm)`;
-      this.dom.hoStandoff.textContent = `${p12.standoff_distance_mm} mm (Clr: ${p12.handover_clearance_mm}mm)`;
-      this.scene.setHandoverPosition(p12.handover_position_world);
+  _refreshHandoverCard() {
+    if (!this.dom.selectInspectorPair) return;
+    const pair = this.dom.selectInspectorPair.value;
+    const pairData = this.handoverPairs ? this.handoverPairs[pair] : null;
+    const mode = this.handoverMode;
+
+    if (!pairData) {
+      if (this.dom.hoCoords) this.dom.hoCoords.textContent = '[No data loaded]';
+      if (this.dom.hoMode) {
+        this.dom.hoMode.textContent = 'NO DATA';
+        this.dom.hoMode.style.background = 'rgba(255, 0, 85, 0.15)';
+        this.dom.hoMode.style.color = '#FF0055';
+      }
+      return;
     }
+
+    if (mode === 'manual') {
+      const m = pairData.manual;
+      if (m && m.available) {
+        if (this.dom.hoCoords) this.dom.hoCoords.textContent = `[${m.handover_position_world.join(', ')}] mm`;
+        if (this.dom.hoMode) {
+          this.dom.hoMode.textContent = 'MANUAL (handover.yaml)';
+          this.dom.hoMode.style.background = 'rgba(255, 184, 0, 0.15)';
+          this.dom.hoMode.style.color = '#FFB800';
+          this.dom.hoMode.style.borderColor = 'rgba(255, 184, 0, 0.3)';
+        }
+        if (this.dom.hoStandoff) this.dom.hoStandoff.textContent = `${m.standoff_distance_mm} mm (Clr: ${m.handover_clearance_mm} mm)`;
+        if (this.dom.badgeInspectorStatus) {
+          this.dom.badgeInspectorStatus.textContent = 'MANUAL';
+          this.dom.badgeInspectorStatus.style.background = 'rgba(255, 184, 0, 0.15)';
+          this.dom.badgeInspectorStatus.style.color = '#FFB800';
+          this.dom.badgeInspectorStatus.style.borderColor = 'rgba(255, 184, 0, 0.3)';
+        }
+        if (this.dom.hoStatusBanner) {
+          this.dom.hoStatusBanner.style.display = 'block';
+          this.dom.hoStatusBanner.style.background = 'rgba(255, 184, 0, 0.1)';
+          this.dom.hoStatusBanner.style.borderColor = 'rgba(255, 184, 0, 0.3)';
+          this.dom.hoStatusBanner.style.color = '#FFB800';
+          this.dom.hoStatusBannerText.textContent = 'Manual Override: Using static postures defined in handover.yaml.';
+        }
+        this.scene.setHandoverPosition(m.handover_position_world);
+      }
+    } else {
+      // mode === 'auto'
+      const a = pairData.auto;
+      if (a && a.available) {
+        if (this.dom.hoCoords) this.dom.hoCoords.textContent = `[${a.handover_position_world.join(', ')}] mm`;
+        if (this.dom.hoMode) {
+          this.dom.hoMode.textContent = `${a.approach_mode} (${a.standoff_distance_mm}mm)`;
+          this.dom.hoMode.style.background = 'rgba(0, 255, 157, 0.15)';
+          this.dom.hoMode.style.color = '#00FF9D';
+          this.dom.hoMode.style.borderColor = 'rgba(0, 255, 157, 0.3)';
+        }
+        if (this.dom.hoStandoff) this.dom.hoStandoff.textContent = `${a.standoff_distance_mm} mm (Clr: ${a.handover_clearance_mm} mm)`;
+        if (this.dom.badgeInspectorStatus) {
+          this.dom.badgeInspectorStatus.textContent = 'AVAILABLE';
+          this.dom.badgeInspectorStatus.style.background = 'rgba(0, 255, 157, 0.15)';
+          this.dom.badgeInspectorStatus.style.color = '#00FF9D';
+          this.dom.badgeInspectorStatus.style.borderColor = 'rgba(0, 255, 157, 0.3)';
+        }
+        if (this.dom.hoStatusBanner) {
+          this.dom.hoStatusBanner.style.display = 'none';
+        }
+        this.scene.setHandoverPosition(a.handover_position_world);
+      } else {
+        // NO AUTO SOLUTION (matching Tkinter GUI screenshot!)
+        if (this.dom.hoCoords) this.dom.hoCoords.textContent = '[No cache loaded]';
+        if (this.dom.hoMode) {
+          this.dom.hoMode.textContent = 'NO AUTO SOLUTION';
+          this.dom.hoMode.style.background = 'rgba(255, 0, 85, 0.2)';
+          this.dom.hoMode.style.color = '#FF0055';
+          this.dom.hoMode.style.borderColor = 'rgba(255, 0, 85, 0.4)';
+        }
+        if (this.dom.hoStandoff) this.dom.hoStandoff.textContent = 'Unavailable';
+        if (this.dom.badgeInspectorStatus) {
+          this.dom.badgeInspectorStatus.textContent = 'UNAVAILABLE';
+          this.dom.badgeInspectorStatus.style.background = 'rgba(255, 0, 85, 0.2)';
+          this.dom.badgeInspectorStatus.style.color = '#FF0055';
+          this.dom.badgeInspectorStatus.style.borderColor = 'rgba(255, 0, 85, 0.4)';
+        }
+        if (this.dom.hoStatusBanner) {
+          this.dom.hoStatusBanner.style.display = 'block';
+          this.dom.hoStatusBanner.style.background = 'rgba(255, 0, 85, 0.12)';
+          this.dom.hoStatusBanner.style.borderColor = 'rgba(255, 0, 85, 0.35)';
+          this.dom.hoStatusBanner.style.color = '#FF4D6D';
+          this.dom.hoStatusBannerText.textContent = "Cache empty or invalid configuration fingerprint. Click 'Recompute' below or select Manual Override.";
+        }
+      }
+    }
+  }
+
+  _updateHandoverCard(handoverPoses) {
+    this._refreshHandoverCard();
   }
 
   _updateJointTables(jointState) {
@@ -1317,12 +1722,14 @@ class WebTwinApp {
 
       row.innerHTML = `
         <div class="jogger-joint-header">
-          <span class="jogger-joint-name">${names[idx] || 'Joint ' + (idx + 1)}</span>
+          <span class="jogger-joint-name">${names[idx] || 'Joint ' + (idx + 1)} <small style="color:var(--text-dim); font-size:10px;">[${limits[0]}°, ${limits[1]}°]</small></span>
           <span class="jogger-joint-val" id="jog-val-${rid}-${idx}">${angle.toFixed(1)}°</span>
         </div>
         <div class="jogger-row-control">
+          <button class="btn btn-glass btn-xs jogger-step-btn" data-step="-1" title="Jog -1°">-1°</button>
           <input type="range" class="jogger-slider" id="jog-slider-${rid}-${idx}"
                  min="${limits[0]}" max="${limits[1]}" step="1" value="${Math.round(angle)}">
+          <button class="btn btn-glass btn-xs jogger-step-btn" data-step="1" title="Jog +1°">+1°</button>
           <input type="number" class="jogger-num-input" id="jog-num-${rid}-${idx}"
                  min="${limits[0]}" max="${limits[1]}" step="0.5" value="${angle.toFixed(1)}">
         </div>
@@ -1331,6 +1738,20 @@ class WebTwinApp {
       const slider = row.querySelector('.jogger-slider');
       const numInput = row.querySelector('.jogger-num-input');
       const valLabel = row.querySelector(`#jog-val-${rid}-${idx}`);
+      const stepBtns = row.querySelectorAll('.jogger-step-btn');
+
+      const updateJoint = (val) => {
+        val = Math.max(limits[0], Math.min(limits[1], val));
+        valLabel.textContent = `${val.toFixed(1)}°`;
+        slider.value = Math.round(val);
+        numInput.value = val.toFixed(1);
+        this.send({
+          cmd: 'manual_jog_joint',
+          robot_id: rid,
+          joint_idx: idx,
+          angle_deg: val,
+        });
+      };
 
       // Two-way sync: slider input
       slider.addEventListener('input', (e) => {
@@ -1346,20 +1767,10 @@ class WebTwinApp {
       });
 
       // Two-way sync: number box input & change
-      const applyNum = (e) => {
+      numInput.addEventListener('change', (e) => {
         let val = parseFloat(e.target.value);
-        if (isNaN(val)) return;
-        val = Math.max(limits[0], Math.min(limits[1], val));
-        valLabel.textContent = `${val.toFixed(1)}°`;
-        slider.value = Math.round(val);
-        this.send({
-          cmd: 'manual_jog_joint',
-          robot_id: rid,
-          joint_idx: idx,
-          angle_deg: val,
-        });
-      };
-      numInput.addEventListener('change', applyNum);
+        if (!isNaN(val)) updateJoint(val);
+      });
       numInput.addEventListener('input', (e) => {
         const val = parseFloat(e.target.value);
         if (!isNaN(val) && val >= limits[0] && val <= limits[1]) {
@@ -1374,12 +1785,27 @@ class WebTwinApp {
         }
       });
 
+      // Step Nudge Buttons (±1°)
+      stepBtns.forEach((sBtn) => {
+        sBtn.addEventListener('click', () => {
+          const delta = parseFloat(sBtn.getAttribute('data-step')) || 0;
+          const currentVal = parseFloat(numInput.value) || 0;
+          updateJoint(currentVal + delta);
+        });
+      });
+
       this.dom.joggerSlidersContainer.appendChild(row);
     });
 
     // Update TCP display
     if (cfg.tcp_world) {
-      this.dom.jogTcpWorld.textContent = `X: ${cfg.tcp_world[0].toFixed(1)}, Y: ${cfg.tcp_world[1].toFixed(1)}, Z: ${cfg.tcp_world[2].toFixed(1)} mm`;
+      const tcp = cfg.tcp_world;
+      const rpy = cfg.tcp_rpy_deg;
+      if (rpy && rpy.length === 3) {
+        this.dom.jogTcpWorld.textContent = `X: ${tcp[0].toFixed(1)}, Y: ${tcp[1].toFixed(1)}, Z: ${tcp[2].toFixed(1)} mm | R: ${rpy[0].toFixed(1)}°, P: ${rpy[1].toFixed(1)}°, Y: ${rpy[2].toFixed(1)}°`;
+      } else {
+        this.dom.jogTcpWorld.textContent = `X: ${tcp[0].toFixed(1)}, Y: ${tcp[1].toFixed(1)}, Z: ${tcp[2].toFixed(1)} mm`;
+      }
     }
 
     // Request Kinematics Inspection (4x4 matrix, dynamic DH)
@@ -1456,27 +1882,73 @@ class WebTwinApp {
         </div>
       `;
     }
+
+    // 4. Update TCP Cartesian XYZ + Euler RPY
+    if (this.dom.jogTcpWorld && data.tcp_world) {
+      const tcp = data.tcp_world;
+      const rpy = data.tcp_rpy_deg;
+      if (rpy && rpy.length === 3) {
+        this.dom.jogTcpWorld.textContent = `X: ${tcp[0].toFixed(1)}, Y: ${tcp[1].toFixed(1)}, Z: ${tcp[2].toFixed(1)} mm | R: ${rpy[0].toFixed(1)}°, P: ${rpy[1].toFixed(1)}°, Y: ${rpy[2].toFixed(1)}°`;
+      } else {
+        this.dom.jogTcpWorld.textContent = `X: ${tcp[0].toFixed(1)}, Y: ${tcp[1].toFixed(1)}, Z: ${tcp[2].toFixed(1)} mm`;
+      }
+    }
   }
 
   _updateHardwareDock(availablePorts, robots) {
-    if (availablePorts && Array.isArray(availablePorts)) {
+    if (robots && robots.robots) {
+      robots = robots.robots;
+    }
+
+    if (availablePorts !== undefined && Array.isArray(availablePorts)) {
       this.hardwareState.available_ports = availablePorts;
       ['robot1', 'robot2', 'robot3'].forEach((rid) => {
         const short = rid === 'robot1' ? 'r1' : rid === 'robot2' ? 'r2' : 'r3';
         const sel = document.getElementById(`select-${short}-port`);
-        if (sel) {
-          const currentVal = sel.value;
-          sel.innerHTML = '';
-          const defaultPort = `/dev/${rid}`;
-          const allOptions = Array.from(new Set([defaultPort, ...availablePorts]));
-          allOptions.forEach((p) => {
+        const fleetSel = document.getElementById(`select-fleet-${short}-port`);
+        const targetRobot = (robots && robots[rid]) || (this.hardwareState.robots && this.hardwareState.robots[rid]);
+        const assignedPort = (targetRobot && targetRobot.assigned_port) || '';
+
+        [sel, fleetSel].forEach((s) => {
+          if (!s) return;
+          const currentOptions = Array.from(s.options).map((o) => o.value).filter((v) => v !== '');
+          const newOptions = availablePorts.length === 0 ? [] : availablePorts;
+          const isSame =
+            currentOptions.length === newOptions.length &&
+            currentOptions.every((val, idx) => val === newOptions[idx]);
+
+          if (isSame) {
+            if (assignedPort && s.value !== assignedPort && currentOptions.includes(assignedPort)) {
+              s.value = assignedPort;
+            }
+            return;
+          }
+
+          const currentVal = s.value;
+          s.innerHTML = '';
+          if (availablePorts.length === 0) {
             const opt = document.createElement('option');
-            opt.value = p;
-            opt.textContent = p;
-            if (p === currentVal) opt.selected = true;
-            sel.appendChild(opt);
-          });
-        }
+            opt.value = '';
+            opt.textContent = 'No devices detected';
+            opt.disabled = true;
+            opt.selected = true;
+            s.appendChild(opt);
+          } else {
+            availablePorts.forEach((p) => {
+              const opt = document.createElement('option');
+              opt.value = p;
+              opt.textContent = p;
+              s.appendChild(opt);
+            });
+            if (currentVal && availablePorts.includes(currentVal)) {
+              s.value = currentVal;
+            } else if (assignedPort && availablePorts.includes(assignedPort)) {
+              s.value = assignedPort;
+            } else if (availablePorts.length > 0) {
+              s.value = availablePorts[0];
+            }
+          }
+        });
       });
     }
 
@@ -1485,17 +1957,21 @@ class WebTwinApp {
       Object.entries(robots).forEach(([rid, rdata]) => {
         const short = rid === 'robot1' ? 'r1' : rid === 'robot2' ? 'r2' : 'r3';
 
-        // Update connection badge
+        // Update connection badges (both in dock and top fleet bar)
         const connBadge = document.getElementById(`hw-${short}-conn-badge`);
-        if (connBadge) {
-          if (rdata.port_connected) {
-            connBadge.textContent = rdata.assigned_port ? `CONNECTED (${rdata.assigned_port})` : 'CONNECTED';
-            connBadge.className = 'hw-status-badge hw-status-connected';
+        const fleetBadge = document.getElementById(`badge-fleet-${short}`);
+        const isConnected = !!(rdata.connected || rdata.port_connected);
+
+        [connBadge, fleetBadge].forEach((badge) => {
+          if (!badge) return;
+          if (isConnected && rdata.assigned_port) {
+            badge.textContent = `CONNECTED (${rdata.assigned_port})`;
+            badge.className = 'hw-status-badge hw-status-connected';
           } else {
-            connBadge.textContent = 'DISCONNECTED';
-            connBadge.className = 'hw-status-badge hw-status-disconnected';
+            badge.textContent = 'DISCONNECTED';
+            badge.className = 'hw-status-badge hw-status-disconnected';
           }
-        }
+        });
 
         // Update mode badge
         const modeBadge = document.getElementById(`hw-${short}-mode-badge`);
@@ -1521,12 +1997,35 @@ class WebTwinApp {
           }
         }
       });
+
+      // Sync Jog Speed Slider and Stage 3 Speed Slider
+      const activeRdata = this.hardwareState.robots && this.hardwareState.robots[this.activeJogRobot];
+      if (activeRdata && activeRdata.speed !== undefined) {
+        const jogSlider = document.getElementById('jog-speed-slider');
+        const jogLabel = document.getElementById('jog-speed-val');
+        if (jogSlider && document.activeElement !== jogSlider) jogSlider.value = activeRdata.speed;
+        if (jogLabel) jogLabel.textContent = `LEVEL ${activeRdata.speed} / 10`;
+      }
+      const anySpeed = (activeRdata && activeRdata.speed) || 3;
+      const s3Slider = document.getElementById('stage3-speed-slider');
+      const s3Label = document.getElementById('stage3-speed-val');
+      if (s3Slider && document.activeElement !== s3Slider) s3Slider.value = anySpeed;
+      if (s3Label) s3Label.textContent = `LEVEL ${anySpeed} / 10`;
     }
 
     if (this.dom.hwRosStatus) {
       this.dom.hwRosStatus.textContent = 'ROS 2 Core Bridge: ACTIVE';
       this.dom.hwRosStatus.style.color = '#00FF9D';
     }
+  }
+
+  _syncJogSpeedSlider() {
+    const rdata = this.hardwareState.robots && this.hardwareState.robots[this.activeJogRobot];
+    const speed = (rdata && rdata.speed !== undefined) ? rdata.speed : 3;
+    const slider = document.getElementById('jog-speed-slider');
+    const label = document.getElementById('jog-speed-val');
+    if (slider && document.activeElement !== slider) slider.value = speed;
+    if (label) label.textContent = `LEVEL ${speed} / 10`;
   }
 
   _copyToClipboard(text, label = 'Data') {
@@ -1555,7 +2054,7 @@ class WebTwinApp {
     const ply = parseFloat(this.dom.placeY.value) || 0;
     const plz = parseFloat(this.dom.placeZ.value) || 0;
     const plyaw = parseFloat(this.dom.placeYaw.value) || 0;
-    return `${px},${py},${pz},${pyaw}|${plx},${ply},${plz},${plyaw}`;
+    return `${px},${py},${pz},${pyaw}|${plx},${ply},${plz},${plyaw}|${this.handoverMode}`;
   }
 
   executeOrSimulateTask(isRealRobot = false) {
@@ -1595,6 +2094,7 @@ class WebTwinApp {
       pick_yaw: pickYaw,
       place_xyz: placeXyz,
       place_yaw: placeYaw,
+      handover_mode: this.handoverMode,
       autoSimulate: !!opts.autoSimulate,
       autoExecute: !!opts.autoExecute,
     };
@@ -1618,9 +2118,17 @@ class WebTwinApp {
     this.dom.chooserPickContainer.innerHTML = '';
     this.dom.chooserPlaceContainer.innerHTML = '';
 
+    // Smart default: if place has a candidate, prefer a distinct candidate for pick to facilitate handover
+    let defaultPickIdx = 0;
+    if (data.pick_candidates.length > 1 && data.place_candidates.length > 0) {
+      const placeFav = data.place_candidates[0];
+      const diffIdx = data.pick_candidates.findIndex((r) => r !== placeFav);
+      if (diffIdx >= 0) defaultPickIdx = diffIdx;
+    }
+
     data.pick_candidates.forEach((rid, idx) => {
       const card = document.createElement('div');
-      card.className = `robot-choice-card pick-choice-card ${idx === 0 ? 'selected' : ''}`;
+      card.className = `robot-choice-card pick-choice-card ${idx === defaultPickIdx ? 'selected' : ''}`;
       card.setAttribute('data-robot', rid);
       const det = data.pick_details[rid];
       card.innerHTML = `<div style="font-weight:700; color:#00F0FF;">${rid.toUpperCase()}</div><div style="font-size:11px; color:#94A3B8;">${det.solver} (tilt ${det.tilt || 0}°)</div>`;
@@ -1693,26 +2201,47 @@ class WebTwinApp {
 
     this.log('▶ [3D Simulation] Starting 9-Phase Stage 3 Trajectory Preview...', 'info');
 
-    const stepIntervalMs = Math.round(50 / this.playbackSpeed);
+    const scheduleNext = () => {
+      if (!this.isPlaying) return;
 
-    if (this.playbackTimer) clearInterval(this.playbackTimer);
-    this.playbackTimer = setInterval(() => {
       this.currentStepIdx++;
       if (this.currentStepIdx >= this.trajectorySteps.length) {
         this.currentStepIdx = this.trajectorySteps.length - 1;
         this.pausePlayback();
         this.log('✓ [3D Simulation] Complete! All trajectory phases safely completed.', 'success');
         this.dom.phaseBadge.textContent = '✓ Simulation Complete';
+        return;
       }
+
       this.dom.timelineSlider.value = this.currentStepIdx;
       this.applyStep(this.currentStepIdx);
-    }, stepIntervalMs);
+
+      // Determine step delay based on phase and timings (matching Tkinter GUI pacing)
+      const step = this.trajectorySteps[this.currentStepIdx];
+      let delayMs = 65; // Base pace matching Tkinter GUI step_interval
+
+      // Dwell phases in Stage 3 Test 2
+      if (step && step.phase_num === 2) {
+        delayMs = 1200; // Phase 2: Grasp dwell (2.0s in hardware, 1.2s in sim)
+      } else if (step && step.phase_num === 5) {
+        delayMs = 800;  // Phase 5: Transfer dwell (1.0s in hardware, 0.8s in sim)
+      } else if (step && step.phase_num === 8) {
+        delayMs = 1200; // Phase 8: Release dwell (2.0s in hardware, 1.2s in sim)
+      }
+
+      const scaledDelay = Math.max(10, Math.round(delayMs / this.playbackSpeed));
+      this.playbackTimer = setTimeout(scheduleNext, scaledDelay);
+    };
+
+    const initialDelay = Math.max(10, Math.round(65 / this.playbackSpeed));
+    if (this.playbackTimer) clearTimeout(this.playbackTimer);
+    this.playbackTimer = setTimeout(scheduleNext, initialDelay);
   }
 
   pausePlayback() {
     this.isPlaying = false;
     if (this.playbackTimer) {
-      clearInterval(this.playbackTimer);
+      clearTimeout(this.playbackTimer);
       this.playbackTimer = null;
     }
     this.dom.btnPlayPause.innerHTML = '<i class="fa fa-play"></i> Simulate';

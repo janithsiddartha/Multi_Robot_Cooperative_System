@@ -20,8 +20,9 @@ class UARTNode(Node):
         self.create_subscription(String, 'serial_tx', self.serial_tx_callback, 10)
         self.create_subscription(String, 'robot_command', self.system_callback, 10)
 
-        # Publisher for GUI
+        # Publishers for GUI and bridge
         self.ports_pub = self.create_publisher(String, 'available_ports', 10)
+        self.connected_port_pub = self.create_publisher(String, 'connected_port', 10)
         self.ports_timer = self.create_timer(0.5, self.publish_ports)
 
         self.get_logger().info('UART DUMB RELAY NODE READY')
@@ -35,12 +36,19 @@ class UARTNode(Node):
         raw_command = msg.data.strip()
         if raw_command.upper().startswith('PORT,'):
             new_port = raw_command.split(',', 1)[1].strip()
-            self.get_logger().info(f'Switching serial port to: {new_port}')
             
             if self.ser is not None and self.ser.is_open:
                 self.ser.close()
                 self.get_logger().info('Closed old serial port.')
 
+            if not new_port or new_port.upper() == 'NONE':
+                self.port = None
+                self.ser = None
+                self.get_logger().info('Serial port disconnected by operator.')
+                self.publish_connected_port()
+                return
+
+            self.get_logger().info(f'Switching serial port to: {new_port}')
             self.port = new_port
             try:
                 self.ser = serial.Serial(self.port, self.baudrate, timeout=0.1, write_timeout=0.1)
@@ -48,6 +56,7 @@ class UARTNode(Node):
             except serial.SerialException as e:
                 self.ser = None
                 self.get_logger().error(f'Failed to open serial port: {e}')
+            self.publish_connected_port()
 
     def send_command(self, command):
         if self.ser is None or not self.ser.is_open:
@@ -61,11 +70,17 @@ class UARTNode(Node):
             self.get_logger().error(f'Serial write failed: {e}')
             return False
 
+    def publish_connected_port(self):
+        conn_msg = String()
+        conn_msg.data = self.port if (self.ser is not None and self.ser.is_open) else 'NONE'
+        self.connected_port_pub.publish(conn_msg)
+
     def publish_ports(self):
         ports = [p.device for p in serial.tools.list_ports.comports() if 'USB' in p.device or 'ACM' in p.device or 'COM' in p.device]
         msg = String()
         msg.data = ','.join(ports) if ports else 'NONE'
         self.ports_pub.publish(msg)
+        self.publish_connected_port()
 
     def destroy_node(self):
         if self.ser is not None and self.ser.is_open:

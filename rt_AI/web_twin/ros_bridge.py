@@ -56,14 +56,15 @@ class WebTwinRosBridge:
         self._execution_total = 0
 
         self.robot_names = ["robot1", "robot2", "robot3"]
-        self.available_ports: List[str] = ["/dev/robot1", "/dev/robot2", "/dev/robot3"]
+        self.available_ports: List[str] = []
+        self.robot_available_ports: Dict[str, List[str]] = {r: [] for r in self.robot_names}
         self._ports_lock = threading.Lock()
 
         # State tracking per robot
         self.robot_states: Dict[str, Dict[str, Any]] = {
             r: {
                 "robot_id": r,
-                "assigned_port": f"/dev/{r}",
+                "assigned_port": "",
                 "connected": False,
                 "control_mode": "MANUAL",
                 "speed": 5,
@@ -80,7 +81,7 @@ class WebTwinRosBridge:
             for r in self.robot_names
         }
 
-        # Initialize gripper limits from twin_engine configs if available
+        # Initialize gripper limits and UART ports from twin_engine configs if available
         if twin_engine and hasattr(twin_engine, "robots"):
             for r in self.robot_names:
                 if r in twin_engine.robots:
@@ -90,16 +91,16 @@ class WebTwinRosBridge:
                     self.robot_states[r]["gripper_angle"] = float(cfg.gripper_open)
                     if hasattr(cfg, "home_deg"):
                         self.robot_states[r]["hardware_joints"] = [float(v) for v in cfg.home_deg]
+                    if hasattr(cfg, "uart_port") and cfg.uart_port:
+                        port_cand = str(cfg.uart_port)
+                        self.robot_states[r]["assigned_port"] = port_cand
 
         self.publishers: Dict[str, Dict[str, Any]] = {r: {} for r in self.robot_names}
         self.refresh_available_ports()
 
     def refresh_available_ports(self) -> List[str]:
-        """Scan system serial devices and merge with preset robot symlinks."""
+        """Scan system serial devices and merge with ports received from ROS available_ports topics."""
         discovered = set()
-        # Default known udev rules symlinks
-        for p in ["/dev/robot1", "/dev/robot2", "/dev/robot3"]:
-            discovered.add(p)
 
         if SERIAL_AVAILABLE:
             try:
@@ -113,10 +114,15 @@ class WebTwinRosBridge:
         # Also check /dev directly if on Linux
         if sys.platform.startswith("linux") and os.path.isdir("/dev"):
             for item in os.listdir("/dev"):
-                if item.startswith("ttyUSB") or item.startswith("ttyACM") or item.startswith("robot"):
+                if item.startswith(("ttyUSB", "ttyACM", "robot")):
                     discovered.add(f"/dev/{item}")
 
         with self._ports_lock:
+            for p in self.available_ports:
+                discovered.add(p)
+            for r_ports in self.robot_available_ports.values():
+                for p in r_ports:
+                    discovered.add(p)
             self.available_ports = sorted(list(discovered))
         return list(self.available_ports)
 
@@ -152,13 +158,13 @@ class WebTwinRosBridge:
                     self.publishers[r]["command"] = self.node.create_publisher(RosString, f"/{r}/robot_command", 10)
                     self.publishers[r]["control_mode_request"] = self.node.create_publisher(RosString, f"/{r}/control_mode_request", 10)
                     self.publishers[r]["speed"] = self.node.create_publisher(RosInt32, f"/{r}/robot_speed", 10)
-                    self.publishers[r]["manual_joints"] = self.node.create_publisher(Float64MultiArray, f"/{r}/manual_joint_commands", 10)
+                    self.publishers[r]["manual_joints"] = self.node.create_publisher(Float64MultiArray, f"/{r}/manual_joint_command", 10)
                     self.publishers[r]["manual_gripper"] = self.node.create_publisher(Float64MultiArray, f"/{r}/manual_gripper_command", 10)
                     self.publishers[r]["ik_target"] = self.node.create_publisher(Float64MultiArray, f"/{r}/ik_gui_target", 10)
                     self.publishers[r]["pick_coords"] = self.node.create_publisher(Float64MultiArray, f"/{r}/pick_coordinates", 10)
                     self.publishers[r]["place_coords"] = self.node.create_publisher(Float64MultiArray, f"/{r}/place_coordinates", 10)
                     self.publishers[r]["trajectory_command"] = self.node.create_publisher(RosString, f"/{r}/trajectory_command", 10)
-                    self.publishers[r]["trajectory_joints"] = self.node.create_publisher(Float64MultiArray, f"/{r}/trajectory_joint_commands", 10)
+                    self.publishers[r]["trajectory_joints"] = self.node.create_publisher(Float64MultiArray, f"/{r}/trajectory_joint_command", 10)
 
                     # Subscribers
                     self.node.create_subscription(
@@ -189,6 +195,24 @@ class WebTwinRosBridge:
                         Float64MultiArray, f"/{r}/gripper_command",
                         lambda msg, rid=r: self._on_gripper_command(rid, msg), 10
                     )
+                    self.node.create_subscription(
+                        RosString, f"/{r}/connected_port",
+                        lambda msg, rid=r: self._on_connected_port(rid, msg), 10
+                    )
+                    self.node.create_subscription(
+                        RosString, f"/{r}/robot_command",
+                        lambda msg, rid=r: self._on_robot_command(rid, msg), 10
+                    )
+                    self.node.create_subscription(
+                        RosInt32, f"/{r}/robot_speed",
+                        lambda msg, rid=r: self._on_robot_speed(rid, msg), 10
+                    )
+
+                self.publishers["global_command"] = self.node.create_publisher(RosString, "robot_command", 10)
+                self.node.create_subscription(
+                    RosString, "available_ports",
+                    lambda msg: self._on_available_ports("global", msg), 10
+                )
 
                 self.is_running = True
                 rclpy.spin(self.node)
@@ -214,27 +238,59 @@ class WebTwinRosBridge:
     # Callbacks
     def _on_available_ports(self, robot_id: str, msg):
         raw = msg.data.strip()
-        if raw and raw != "NONE":
-            ports = [p.strip() for p in raw.split(",") if p.strip()]
-            with self._ports_lock:
-                for p in ports:
-                    if p not in self.available_ports:
-                        self.available_ports.append(p)
-                self.available_ports.sort()
+        ports = [p.strip() for p in raw.split(",") if p.strip()] if (raw and raw != "NONE") else []
+        with self._ports_lock:
+            if robot_id in self.robot_available_ports:
+                self.robot_available_ports[robot_id] = ports
+            all_ports = set()
+            for r_ports in self.robot_available_ports.values():
+                all_ports.update(r_ports)
+            if robot_id == "global":
+                all_ports.update(ports)
+            for p in self.available_ports:
+                all_ports.add(p)
+            self.available_ports = sorted(list(all_ports))
+
+    def _on_connected_port(self, robot_id: str, msg):
+        port = msg.data.strip()
+        if robot_id in self.robot_states:
+            if port and port.upper() != "NONE":
+                self.robot_states[robot_id]["assigned_port"] = port
+                self.robot_states[robot_id]["connected"] = True
+            else:
+                self.robot_states[robot_id]["assigned_port"] = ""
+                self.robot_states[robot_id]["connected"] = False
+
+    def _on_robot_command(self, robot_id: str, msg):
+        cmd = msg.data.strip()
+        if cmd.upper().startswith("PORT,"):
+            p = cmd.split(",", 1)[1].strip()
+            if robot_id in self.robot_states:
+                if p and p.upper() != "NONE":
+                    self.robot_states[robot_id]["assigned_port"] = p
+                    self.robot_states[robot_id]["connected"] = True
+                else:
+                    self.robot_states[robot_id]["assigned_port"] = ""
+                    self.robot_states[robot_id]["connected"] = False
+
+    def _on_robot_speed(self, robot_id: str, msg):
+        speed = max(1, min(10, int(msg.data)))
+        if robot_id in self.robot_states:
+            self.robot_states[robot_id]["speed"] = speed
 
     def _on_control_mode(self, robot_id: str, msg):
         mode = msg.data.strip().upper()
         if mode in ["MANUAL", "TRAJECTORY", "HALTED"]:
             self.robot_states[robot_id]["control_mode"] = mode
-            self.robot_states[robot_id]["connected"] = True
             self.robot_states[robot_id]["last_heartbeat"] = time.time()
 
     def _on_joint_commands(self, robot_id: str, msg):
         if msg.data:
             q_list = [round(float(v), 2) for v in msg.data]
             self.robot_states[robot_id]["hardware_joints"] = q_list
-            self.robot_states[robot_id]["connected"] = True
             self.robot_states[robot_id]["last_heartbeat"] = time.time()
+            if self.twin_engine and hasattr(self.twin_engine, "current_q"):
+                self.twin_engine.current_q[robot_id] = q_list
 
     def _on_tcp_position(self, robot_id: str, msg):
         if len(msg.data) >= 3:
@@ -258,6 +314,8 @@ class WebTwinRosBridge:
                 self.robot_states[robot_id]["gripper_state"] = "CLOSED"
             else:
                 self.robot_states[robot_id]["gripper_state"] = "CUSTOM"
+            if self.twin_engine and hasattr(self.twin_engine, "gripper_state"):
+                self.twin_engine.gripper_state[robot_id] = self.robot_states[robot_id]["gripper_state"].lower()
 
     # Control API
     def set_robot_port(self, robot_id: str, port: str) -> dict:
@@ -266,7 +324,7 @@ class WebTwinRosBridge:
             return {"success": False, "error": f"Invalid robot_id: {robot_id}"}
 
         self.robot_states[robot_id]["assigned_port"] = port
-        self.robot_states[robot_id]["connected"] = True
+        self.robot_states[robot_id]["connected"] = bool(port)
 
         if self.node and robot_id in self.publishers and "command" in self.publishers[robot_id]:
             msg = RosString()
@@ -274,12 +332,43 @@ class WebTwinRosBridge:
             self.publishers[robot_id]["command"].publish(msg)
             print(f"[WebTwin ROS] Sent PORT command: PORT,{port} -> /{robot_id}/robot_command")
 
+        if self.node and "global_command" in self.publishers:
+            msg = RosString()
+            msg.data = f"PORT,{port}"
+            self.publishers["global_command"].publish(msg)
+
         return {
             "success": True,
             "robot_id": robot_id,
             "port": port,
-            "status": "CONNECTING",
+            "status": "CONNECTED",
             "message": f"Bound {robot_id.upper()} to physical serial port {port}.",
+        }
+
+    def disconnect_robot_port(self, robot_id: str) -> dict:
+        """Disconnect robot from serial port."""
+        if robot_id not in self.robot_states:
+            return {"success": False, "error": f"Invalid robot_id: {robot_id}"}
+
+        self.robot_states[robot_id]["connected"] = False
+        self.robot_states[robot_id]["assigned_port"] = ""
+
+        if self.node and robot_id in self.publishers and "command" in self.publishers[robot_id]:
+            msg = RosString()
+            msg.data = "PORT,NONE"
+            self.publishers[robot_id]["command"].publish(msg)
+            print(f"[WebTwin ROS] Sent DISCONNECT command: PORT,NONE -> /{robot_id}/robot_command")
+
+        if self.node and "global_command" in self.publishers:
+            msg = RosString()
+            msg.data = "PORT,NONE"
+            self.publishers["global_command"].publish(msg)
+
+        return {
+            "success": True,
+            "robot_id": robot_id,
+            "status": "DISCONNECTED",
+            "message": f"Disconnected {robot_id.upper()} from serial port.",
         }
 
     def emergency_stop(self, robot_id: str = "all") -> dict:
@@ -368,6 +457,8 @@ class WebTwinRosBridge:
 
         return {"success": True, "robot_id": robot_id, "speed": speed}
 
+    set_robot_speed = set_speed
+
     def set_gripper_limits(self, robot_id: str, open_deg: float, close_deg: float) -> dict:
         """Update customized open and close degree limits for gripper."""
         if robot_id in self.robot_states:
@@ -396,10 +487,17 @@ class WebTwinRosBridge:
 
     def publish_manual_joints(self, robot_id: str, joint_angles: List[float]):
         """Publish manual joint angles when slider moves or typed angle is submitted."""
-        if self.node and robot_id in self.publishers and "manual_joints" in self.publishers[robot_id]:
-            msg = Float64MultiArray()
-            msg.data = [float(a) for a in joint_angles]
-            self.publishers[robot_id]["manual_joints"].publish(msg)
+        if self.node and robot_id in self.publishers:
+            if self.robot_states.get(robot_id, {}).get("control_mode") != "MANUAL":
+                if "control_mode_request" in self.publishers[robot_id]:
+                    req = RosString()
+                    req.data = "MANUAL"
+                    self.publishers[robot_id]["control_mode_request"].publish(req)
+                self.robot_states[robot_id]["control_mode"] = "MANUAL"
+            if "manual_joints" in self.publishers[robot_id]:
+                msg = Float64MultiArray()
+                msg.data = [float(a) for a in joint_angles]
+                self.publishers[robot_id]["manual_joints"].publish(msg)
 
     def execute_single_pick_place(
         self, robot_id: str, pick_xyz: List[float], pick_yaw: float, place_xyz: List[float], place_yaw: float

@@ -88,10 +88,10 @@ robots:
     world_base_xyz: [-250.0, 0.0, 0.0]
     world_base_rpy_deg: [0.0, 0.0, 0.0]
   robot2:
-    world_base_xyz: [250.0, 0.0, 0.0]
+    world_base_xyz: [0.0, 250.0, 0.0]
     world_base_rpy_deg: [0.0, 0.0, 180.0]
   robot3:
-    world_base_xyz: [0.0, 250.0, 0.0]
+    world_base_xyz: [250.0, 0.0, 0.0]
     world_base_rpy_deg: [0.0, 0.0, 90.0]
 
 manual_handover:

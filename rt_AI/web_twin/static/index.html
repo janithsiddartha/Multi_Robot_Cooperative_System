@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
   <!-- Application Stylesheet -->
-  <link rel="stylesheet" href="/static/css/style.css?v=2.2">
+  <link rel="stylesheet" href="/static/css/style.css?v=3.0">
 
   <!-- Three.js & Controls from CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -63,6 +63,50 @@
     </header>
 
     <!-- ============================================================
+         FLEET HARDWARE SERIAL CONNECTION & STATUS STRIP (ALWAYS VISIBLE)
+         ============================================================ -->
+    <div id="fleet-hardware-bar">
+      <div class="fleet-bar-inner">
+        <!-- Robot 1 Fleet Item -->
+        <div class="fleet-port-group card-cyan">
+          <span class="fleet-robot-label" style="color: var(--robot1-cyan);"><i class="fa fa-robot"></i> R1</span>
+          <select id="select-fleet-r1-port" class="fleet-port-select">
+            <option value="" disabled selected>No devices detected</option>
+          </select>
+          <button class="btn btn-primary btn-xs btn-fleet-connect" data-robot="robot1" title="Connect to serial port">SET</button>
+          <button class="btn btn-glass btn-xs btn-fleet-disconnect" data-robot="robot1" title="Disconnect serial port">DISC</button>
+          <span id="badge-fleet-r1" class="hw-status-badge hw-status-disconnected">DISCONNECTED</span>
+        </div>
+
+        <!-- Robot 2 Fleet Item -->
+        <div class="fleet-port-group card-violet">
+          <span class="fleet-robot-label" style="color: var(--robot2-violet);"><i class="fa fa-robot"></i> R2</span>
+          <select id="select-fleet-r2-port" class="fleet-port-select">
+            <option value="" disabled selected>No devices detected</option>
+          </select>
+          <button class="btn btn-primary btn-xs btn-fleet-connect" data-robot="robot2" title="Connect to serial port">SET</button>
+          <button class="btn btn-glass btn-xs btn-fleet-disconnect" data-robot="robot2" title="Disconnect serial port">DISC</button>
+          <span id="badge-fleet-r2" class="hw-status-badge hw-status-disconnected">DISCONNECTED</span>
+        </div>
+
+        <!-- Robot 3 Fleet Item -->
+        <div class="fleet-port-group card-amber">
+          <span class="fleet-robot-label" style="color: var(--robot3-amber);"><i class="fa fa-robot"></i> R3</span>
+          <select id="select-fleet-r3-port" class="fleet-port-select">
+            <option value="" disabled selected>No devices detected</option>
+          </select>
+          <button class="btn btn-primary btn-xs btn-fleet-connect" data-robot="robot3" title="Connect to serial port">SET</button>
+          <button class="btn btn-glass btn-xs btn-fleet-disconnect" data-robot="robot3" title="Disconnect serial port">DISC</button>
+          <span id="badge-fleet-r3" class="hw-status-badge hw-status-disconnected">DISCONNECTED</span>
+        </div>
+
+        <button id="btn-fleet-scan-ports" class="btn btn-glass btn-xs" title="Scan System USB / ACM Ports">
+          <i class="fa fa-arrows-rotate"></i> Scan Ports
+        </button>
+      </div>
+    </div>
+
+    <!-- ============================================================
          MAIN WORKSPACE: CONTROL SIDEBAR + 3D VIEWPORT + TELEMETRY
          ============================================================ -->
     <main id="main-content">
@@ -105,15 +149,15 @@
             <div class="coord-grid">
               <div class="input-group">
                 <label for="input-pick-x" class="input-label">X [mm]</label>
-                <input type="number" id="input-pick-x" class="input-control" value="-200.0" step="5">
+                <input type="number" id="input-pick-x" class="input-control" value="100.0" step="5">
               </div>
               <div class="input-group">
                 <label for="input-pick-y" class="input-label">Y [mm]</label>
-                <input type="number" id="input-pick-y" class="input-control" value="150.0" step="5">
+                <input type="number" id="input-pick-y" class="input-control" value="100.0" step="5">
               </div>
               <div class="input-group">
                 <label for="input-pick-z" class="input-label">Z [mm]</label>
-                <input type="number" id="input-pick-z" class="input-control" value="150.0" step="5">
+                <input type="number" id="input-pick-z" class="input-control" value="200.0" step="5">
               </div>
             </div>
 
@@ -128,9 +172,9 @@
             </div>
 
             <div class="preset-pills">
-              <button class="preset-pill" data-type="pick" data-coords="[-200.0, 150.0, 150.0]" data-yaw="0">NW Bay (R3)</button>
-              <button class="preset-pill" data-type="pick" data-coords="[-100.0, 250.0, 150.0]" data-yaw="0">North Bay (R1/R3)</button>
-              <button class="preset-pill" data-type="pick" data-coords="[0.0, 150.0, 150.0]" data-yaw="0">Center (R1/R2)</button>
+              <button class="preset-pill" data-type="pick" data-coords="[100.0, 100.0, 200.0]" data-yaw="0">Default [100, 100, 200]</button>
+              <button class="preset-pill" data-type="pick" data-coords="[0.0, 150.0, 150.0]" data-yaw="0">Center [0, 150, 150]</button>
+              <button class="preset-pill" data-type="pick" data-coords="[-100.0, 150.0, 150.0]" data-yaw="0">West [-100, 150, 150]</button>
             </div>
           </section>
 
@@ -146,15 +190,15 @@
             <div class="coord-grid">
               <div class="input-group">
                 <label for="input-place-x" class="input-label">X [mm]</label>
-                <input type="number" id="input-place-x" class="input-control" value="150.0" step="5">
+                <input type="number" id="input-place-x" class="input-control" value="0.0" step="5">
               </div>
               <div class="input-group">
                 <label for="input-place-y" class="input-label">Y [mm]</label>
-                <input type="number" id="input-place-y" class="input-control" value="100.0" step="5">
+                <input type="number" id="input-place-y" class="input-control" value="150.0" step="5">
               </div>
               <div class="input-group">
                 <label for="input-place-z" class="input-label">Z [mm]</label>
-                <input type="number" id="input-place-z" class="input-control" value="180.0" step="5">
+                <input type="number" id="input-place-z" class="input-control" value="150.0" step="5">
               </div>
             </div>
 
@@ -169,9 +213,50 @@
             </div>
 
             <div class="preset-pills">
-              <button class="preset-pill" data-type="place" data-coords="[150.0, 100.0, 180.0]" data-yaw="0">East Line (R1)</button>
-              <button class="preset-pill" data-type="place" data-coords="[391.45, -133.55, 150.0]" data-yaw="0">SE Table (R2)</button>
-              <button class="preset-pill" data-type="place" data-coords="[228.47, -178.7, 200.0]" data-yaw="0">East Buffer (R2)</button>
+              <button class="preset-pill" data-type="place" data-coords="[0.0, 150.0, 150.0]" data-yaw="0">Default [0, 150, 150]</button>
+              <button class="preset-pill" data-type="place" data-coords="[150.0, 100.0, 180.0]" data-yaw="0">East [150, 100, 180]</button>
+              <button class="preset-pill" data-type="place" data-coords="[100.0, 100.0, 200.0]" data-yaw="0">North [100, 100, 200]</button>
+            </div>
+          </section>
+
+          <!-- Handover Strategy Selector Card (matching Stage 3 Test 2 GUI) -->
+          <section id="card-stage3-ho-strategy" class="glass-card card-amber" style="margin-top: 10px;">
+            <div class="card-header">
+              <span class="card-title">
+                <i class="fa fa-handshake" style="color: var(--robot3-amber);"></i> Handover Strategy
+              </span>
+              <span id="badge-stage3-ho-status" class="badge-tag" style="background: rgba(0, 255, 157, 0.15); color: #00FF9D; border: 1px solid rgba(0, 255, 157, 0.3);">AUTO</span>
+            </div>
+            <div style="display: flex; gap: 12px; margin-top: 4px; font-size: 11px;">
+              <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; color: var(--robot1-cyan); font-weight: 600;">
+                <input type="radio" name="stage3-handover-mode" value="auto" checked style="accent-color: var(--robot1-cyan);">
+                Auto Kinematics (Top-of-WS)
+              </label>
+              <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; color: #F59E0B; font-weight: 600;">
+                <input type="radio" name="stage3-handover-mode" value="manual" style="accent-color: #F59E0B;">
+                Manual Override
+              </label>
+            </div>
+            <div id="stage3-ho-note" style="font-size: 10px; color: var(--text-dim); margin-top: 6px; font-family: var(--font-mono);">
+              Auto: Top-of-workspace corridor | Manual: Static postures from handover.yaml
+            </div>
+          </section>
+
+          <!-- Stage 3 Motion Speed Control -->
+          <section id="card-stage3-speed" class="glass-card" style="padding: 10px 12px; margin-top: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span style="font-size: 11px; font-weight: 700; color: var(--robot1-cyan); text-transform: uppercase;">
+                <i class="fa fa-tachometer-alt"></i> Execution Speed
+              </span>
+              <span id="stage3-speed-val" style="font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--text-main);">
+                LEVEL 3 / 10
+              </span>
+            </div>
+            <input type="range" id="stage3-speed-slider" min="1" max="10" step="1" value="3" style="width: 100%; accent-color: var(--robot1-cyan); cursor: pointer;">
+            <div style="display: flex; justify-content: space-between; font-size: 9px; color: var(--text-dim); margin-top: 2px;">
+              <span>1 (Slow)</span>
+              <span>3 (Default)</span>
+              <span>10 (Max)</span>
             </div>
           </section>
 
@@ -308,8 +393,8 @@
             <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px;">Select Active Robot</div>
             <div class="jogger-robot-pills">
               <button class="jogger-pill active" data-robot="robot1">R1 (5-DOF, 0°)</button>
-              <button class="jogger-pill" data-robot="robot2">R2 (5-DOF, -120°)</button>
-              <button class="jogger-pill" data-robot="robot3">R3 (6-DOF, 120°)</button>
+              <button class="jogger-pill" data-robot="robot2">R2 (5-DOF, 180°)</button>
+              <button class="jogger-pill" data-robot="robot3">R3 (6-DOF, 90°)</button>
             </div>
           </div>
 
@@ -325,6 +410,23 @@
           <div id="jog-sub-joints" class="jog-subpane active">
             <div id="jogger-sliders-container" class="glass-card" style="padding: 12px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px;">
               <!-- Generated dynamically in JS based on active robot with slider + input box -->
+            </div>
+            <!-- Active Robot Motion Speed Slider (Matching Individual GUI) -->
+            <div class="glass-card" style="padding: 10px 12px; margin-bottom: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 11px; font-weight: 700; color: var(--robot1-cyan); text-transform: uppercase;">
+                  <i class="fa fa-tachometer-alt"></i> Motion Speed
+                </span>
+                <span id="jog-speed-val" style="font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--text-main);">
+                  LEVEL 3 / 10
+                </span>
+              </div>
+              <input type="range" id="jog-speed-slider" min="1" max="10" step="1" value="3" style="width: 100%; accent-color: var(--robot1-cyan); cursor: pointer;">
+              <div style="display: flex; justify-content: space-between; font-size: 9px; color: var(--text-dim); margin-top: 2px;">
+                <span>1 (Slow)</span>
+                <span>3 (Default)</span>
+                <span>10 (Max)</span>
+              </div>
             </div>
             <button id="btn-copy-joints" class="btn btn-glass btn-full" style="font-size: 11px; padding: 6px; margin-bottom: 8px;">
               <i class="fa fa-clipboard"></i> 📋 Copy Joints Array
@@ -357,7 +459,20 @@
                 <input type="number" id="input-single-ik-yaw" class="input-control" value="0.0">
               </div>
 
-              <div style="display: flex; gap: 4px; margin-top: 6px;">
+              <!-- Cartesian Step Nudge Grid (10 mm steps) -->
+              <div style="margin-top: 8px;">
+                <div style="font-size: 10px; color: var(--text-dim); margin-bottom: 3px; text-transform: uppercase;">Cartesian Step Nudge (±10 mm)</div>
+                <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px;">
+                  <button class="btn btn-glass btn-xs btn-nudge-xyz" data-axis="x" data-dir="-1" title="Jog -X by 10mm">-X</button>
+                  <button class="btn btn-glass btn-xs btn-nudge-xyz" data-axis="x" data-dir="1" title="Jog +X by 10mm">+X</button>
+                  <button class="btn btn-glass btn-xs btn-nudge-xyz" data-axis="y" data-dir="-1" title="Jog -Y by 10mm">-Y</button>
+                  <button class="btn btn-glass btn-xs btn-nudge-xyz" data-axis="y" data-dir="1" title="Jog +Y by 10mm">+Y</button>
+                  <button class="btn btn-glass btn-xs btn-nudge-xyz" data-axis="z" data-dir="-1" title="Jog -Z by 10mm">-Z</button>
+                  <button class="btn btn-glass btn-xs btn-nudge-xyz" data-axis="z" data-dir="1" title="Jog +Z by 10mm">+Z</button>
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 4px; margin-top: 8px;">
                 <button id="btn-single-ik-current" class="btn btn-glass btn-sm" style="flex: 1; font-size: 10px;">SET CURRENT</button>
                 <button id="btn-single-ik-clear" class="btn btn-glass btn-sm" style="flex: 1; font-size: 10px;">CLEAR</button>
                 <button id="btn-copy-xyz" class="btn btn-glass btn-sm" style="flex: 1; font-size: 10px;">📋 COPY XYZ</button>
@@ -469,7 +584,7 @@
               <span>ACTIVE TCP POSE (WORLD FK)</span>
               <span id="jog-fk-status" class="badge-tag">READY</span>
             </div>
-            <div id="jog-tcp-world" style="color: var(--robot1-cyan); font-weight: 700;">X: --, Y: --, Z: -- mm</div>
+            <div id="jog-tcp-world" style="color: var(--robot1-cyan); font-weight: 700; word-break: break-all;">X: --, Y: --, Z: -- mm | R: --, P: --, Y: --°</div>
           </div>
         </div>
 
@@ -503,7 +618,7 @@
 
             <div style="display: flex; gap: 6px; align-items: center;">
               <select id="select-r1-port" class="input-control hw-port-dropdown" style="flex: 1; padding: 5px; font-size: 11px; font-family: var(--font-mono);">
-                <option value="/dev/robot1">/dev/robot1</option>
+                <option value="" disabled selected>No devices detected</option>
               </select>
               <button class="btn btn-primary btn-sm btn-hw-connect" data-robot="robot1" style="font-size: 10px; padding: 5px 10px;">
                 SET PORT
@@ -536,7 +651,7 @@
 
             <div style="display: flex; gap: 6px; align-items: center;">
               <select id="select-r2-port" class="input-control hw-port-dropdown" style="flex: 1; padding: 5px; font-size: 11px; font-family: var(--font-mono);">
-                <option value="/dev/robot2">/dev/robot2</option>
+                <option value="" disabled selected>No devices detected</option>
               </select>
               <button class="btn btn-primary btn-sm btn-hw-connect" data-robot="robot2" style="font-size: 10px; padding: 5px 10px;">
                 SET PORT
@@ -569,7 +684,7 @@
 
             <div style="display: flex; gap: 6px; align-items: center;">
               <select id="select-r3-port" class="input-control hw-port-dropdown" style="flex: 1; padding: 5px; font-size: 11px; font-family: var(--font-mono);">
-                <option value="/dev/robot3">/dev/robot3</option>
+                <option value="" disabled selected>No devices detected</option>
               </select>
               <button class="btn btn-primary btn-sm btn-hw-connect" data-robot="robot3" style="font-size: 10px; padding: 5px 10px;">
                 SET PORT
@@ -598,11 +713,36 @@
               <span class="card-title">
                 <i class="fa fa-handshake" style="color: var(--robot3-amber);"></i> Handover Solutions
               </span>
-              <span class="badge-tag">TOP-OF-WS</span>
+              <span id="badge-inspector-status" class="badge-tag" style="background: rgba(0, 255, 157, 0.15); color: #00FF9D; border: 1px solid rgba(0, 255, 157, 0.3);">TOP-OF-WS</span>
+            </div>
+
+            <!-- Handover Mode Radios (Auto Kinematics vs Manual Override) -->
+            <div style="background: rgba(12, 18, 32, 0.6); padding: 8px; border-radius: 6px; border: 1px solid var(--border-subtle); margin-bottom: 10px;">
+              <div style="font-size: 10px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px;">Handover Strategy</div>
+              <div style="display: flex; gap: 10px;">
+                <label style="display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: var(--robot1-cyan); cursor: pointer;">
+                  <input type="radio" name="inspector-handover-mode" value="auto" checked style="accent-color: var(--robot1-cyan);">
+                  Auto Kinematics (Top-of-WS)
+                </label>
+                <label style="display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: #F59E0B; cursor: pointer;">
+                  <input type="radio" name="inspector-handover-mode" value="manual" style="accent-color: #F59E0B;">
+                  Manual Override
+                </label>
+              </div>
             </div>
 
             <div class="input-group" style="margin-bottom: 8px;">
-              <label for="select-inspector-pair" class="input-label">Select Robot Pair</label>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <label for="select-inspector-pair" class="input-label" style="margin-bottom: 0;">Select Robot Pair</label>
+                <div style="display: flex; gap: 4px;">
+                  <button id="btn-reload-ho-cache" class="btn btn-glass btn-sm" style="font-size: 9px; padding: 2px 6px;" title="Reload handover cache">
+                    <i class="fa fa-rotate"></i> Reload
+                  </button>
+                  <button id="btn-clear-ho-cache" class="btn btn-glass btn-sm" style="font-size: 9px; padding: 2px 6px; color: #FF4D6D; border-color: rgba(255, 77, 109, 0.4);" title="Clear handover cache">
+                    <i class="fa fa-trash"></i> Clear
+                  </button>
+                </div>
+              </div>
               <select id="select-inspector-pair" class="input-control">
                 <option value="robot1_robot2">Robot 1 &lt;-&gt; Robot 2 (Center)</option>
                 <option value="robot2_robot3">Robot 2 &lt;-&gt; Robot 3 (South-East)</option>
@@ -615,14 +755,31 @@
                 <span style="color: var(--text-dim);">Coordinates:</span>
                 <strong id="ho-coords" style="color: var(--text-main);">[37.5, -37.5, 362.5] mm</strong>
               </div>
-              <div style="display: flex; justify-content: space-between;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
                 <span style="color: var(--text-dim);">Approach Mode:</span>
-                <span id="ho-mode" style="color: var(--robot1-cyan);">DUAL_SYNCHRONIZED (50mm)</span>
+                <span id="ho-mode" class="badge-tag" style="background: rgba(0, 255, 157, 0.15); color: #00FF9D; border: 1px solid rgba(0, 255, 157, 0.3);">DUAL_SYNCHRONIZED (50mm)</span>
               </div>
               <div style="display: flex; justify-content: space-between;">
                 <span style="color: var(--text-dim);">Standoff Dist:</span>
                 <span id="ho-standoff" style="color: var(--status-safe);">50.0 mm (&gt;= 50mm safe)</span>
               </div>
+            </div>
+
+            <!-- Dynamic Warning / Status Banner matching Tkinter -->
+            <div id="ho-status-banner" style="display: none; padding: 6px 8px; border-radius: 6px; font-size: 10px; font-family: var(--font-mono); margin-bottom: 10px; background: rgba(255, 0, 85, 0.12); border: 1px solid rgba(255, 0, 85, 0.35); color: #FF4D6D;">
+              <i class="fa fa-triangle-exclamation"></i> <span id="ho-status-banner-text">Cache empty or invalid configuration fingerprint. Click 'Recompute' below or select Manual Override.</span>
+            </div>
+
+            <!-- Recompute Buttons (Stage 3 Test 2) -->
+            <div style="margin-bottom: 8px;">
+              <div style="display: flex; gap: 4px; margin-bottom: 4px;">
+                <button id="btn-recomp-pair-12" class="btn btn-glass btn-sm" style="flex: 1; font-size: 10px; color: var(--robot1-cyan); padding: 4px 2px;" title="Recompute robot1_robot2 Top-of-Workspace solution">⚡ 1-2</button>
+                <button id="btn-recomp-pair-23" class="btn btn-glass btn-sm" style="flex: 1; font-size: 10px; color: var(--robot1-cyan); padding: 4px 2px;" title="Recompute robot2_robot3 Top-of-Workspace solution">⚡ 2-3</button>
+                <button id="btn-recomp-pair-31" class="btn btn-glass btn-sm" style="flex: 1; font-size: 10px; color: var(--robot1-cyan); padding: 4px 2px;" title="Recompute robot3_robot1 Top-of-Workspace solution">⚡ 3-1</button>
+              </div>
+              <button id="btn-recompute-handover" class="btn btn-glass btn-full" style="font-size: 11px; color: var(--robot1-cyan); border-color: rgba(0, 240, 255, 0.3);">
+                <i class="fa fa-bolt"></i> ⚡ Recompute All (Top-WS)
+              </button>
             </div>
 
             <!-- Handover 3D Posing Action Buttons (like Stage 3 Test 2 GUI) -->
@@ -881,10 +1038,10 @@
 
   </div>
 
-  <!-- Main JavaScript App Entrypoint (Cache Buster v2.5) -->
-  <script src="/static/js/robot_models.js?v=2.5"></script>
-  <script src="/static/js/laser_gauge.js?v=2.5"></script>
-  <script src="/static/js/scene.js?v=2.5"></script>
-  <script src="/static/js/app.js?v=2.5"></script>
+  <!-- Main JavaScript App Entrypoint (Cache Buster v3.1) -->
+  <script src="/static/js/robot_models.js?v=3.1"></script>
+  <script src="/static/js/laser_gauge.js?v=3.1"></script>
+  <script src="/static/js/scene.js?v=3.1"></script>
+  <script src="/static/js/app.js?v=3.3"></script>
 </body>
 </html>

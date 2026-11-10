@@ -51,6 +51,11 @@ class MockKinematicsConfig:
         self.gripper_close = float(gripper.get("close_angle", 55.0))
         self.gripper_finger_axis = str(gripper.get("finger_axis", "x")).lower()
         self.gripper_approach_axis = str(gripper.get("approach_axis", "z")).lower()
+
+        uart = params.get("uart", {})
+        self.uart_port = str(uart.get("port", "/dev/ttyACM0"))
+        self.uart_baudrate = int(uart.get("baudrate", 115200))
+
         self.handover_cfg = handover_cfg or {}
 
 

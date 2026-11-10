@@ -159,6 +159,274 @@
           "corridor_b_valid": true
         }
       }
+    },
+    "19d0715844550a52": {
+      "timestamp": "2026-11-09T22:32:57",
+      "pairs": {
+        "robot1_robot2": {
+          "pair_name": "robot1_robot2",
+          "handover_position_world": [
+            62.5,
+            12.5,
+            362.5
+          ],
+          "standoff_distance_mm": 50.0,
+          "robot_a_id": "robot1",
+          "robot_b_id": "robot2",
+          "robot_a_handover_q_deg": [
+            2.29,
+            -21.74,
+            -15.46,
+            37.39,
+            -90.0
+          ],
+          "robot_b_handover_q_deg": [
+            -4.26,
+            -6.67,
+            -3.9,
+            0.64,
+            86.58
+          ],
+          "robot_a_pre_handover_q_deg": [
+            2.29,
+            -8.19,
+            -15.39,
+            62.55,
+            -90.0
+          ],
+          "robot_b_pre_handover_q_deg": [
+            -5.88,
+            9.85,
+            -14.54,
+            2.12,
+            90.0
+          ],
+          "handover_clearance_mm": 239.07,
+          "pre_handover_clearance_mm": 99.61,
+          "error_a_mm": 0.0,
+          "error_b_mm": 0.0,
+          "dot_z": -0.9845,
+          "dot_x": 0.0149,
+          "approach_angle_dev_deg": 10.09,
+          "approach_mode": "DUAL_SYNCHRONIZED",
+          "candidate_origin": "TOP_OF_WORKSPACE",
+          "corridor_a_valid": true,
+          "corridor_b_valid": true
+        },
+        "robot2_robot3": {
+          "pair_name": "robot2_robot3",
+          "handover_position_world": [
+            112.5,
+            212.5,
+            262.5
+          ],
+          "standoff_distance_mm": 50.0,
+          "robot_a_id": "robot2",
+          "robot_b_id": "robot3",
+          "robot_a_handover_q_deg": [
+            -31.53,
+            -11.26,
+            -59.37,
+            -64.97,
+            68.03
+          ],
+          "robot_b_handover_q_deg": [
+            85.52,
+            75.75,
+            -16.03,
+            86.35,
+            -78.52,
+            -55.0
+          ],
+          "robot_a_pre_handover_q_deg": [
+            -20.2,
+            1.43,
+            -60.83,
+            -56.85,
+            76.92
+          ],
+          "robot_b_pre_handover_q_deg": [
+            80.47,
+            64.72,
+            13.36,
+            -48.96,
+            -86.98,
+            41.94
+          ],
+          "handover_clearance_mm": 194.66,
+          "pre_handover_clearance_mm": 62.62,
+          "error_a_mm": 0.003,
+          "error_b_mm": 0.002,
+          "dot_z": -0.9739,
+          "dot_x": 0.0358,
+          "approach_angle_dev_deg": 13.12,
+          "approach_mode": "ASYMMETRIC_B_FIRST",
+          "candidate_origin": "TOP_OF_WORKSPACE",
+          "corridor_a_valid": true,
+          "corridor_b_valid": false
+        },
+        "robot3_robot1": {
+          "pair_name": "robot3_robot1",
+          "handover_position_world": [
+            -137.5,
+            237.5,
+            262.5
+          ],
+          "standoff_distance_mm": 50.0,
+          "robot_a_id": "robot3",
+          "robot_b_id": "robot1",
+          "robot_a_handover_q_deg": [
+            81.4,
+            -15.88,
+            -3.88,
+            90.0,
+            -81.23,
+            -31.78
+          ],
+          "robot_b_handover_q_deg": [
+            64.65,
+            30.28,
+            -87.28,
+            34.47,
+            -12.18
+          ],
+          "robot_a_pre_handover_q_deg": [
+            56.85,
+            -12.9,
+            -7.13,
+            89.04,
+            -84.49,
+            0.0
+          ],
+          "robot_b_pre_handover_q_deg": [
+            64.65,
+            45.83,
+            -87.08,
+            53.93,
+            -12.18
+          ],
+          "handover_clearance_mm": 181.16,
+          "pre_handover_clearance_mm": 99.66,
+          "error_a_mm": 0.001,
+          "error_b_mm": 0.001,
+          "dot_z": -0.9861,
+          "dot_x": 0.0007,
+          "approach_angle_dev_deg": 9.57,
+          "approach_mode": "ASYMMETRIC_A_FIRST",
+          "candidate_origin": "TOP_OF_WORKSPACE",
+          "corridor_a_valid": false,
+          "corridor_b_valid": true
+        }
+      }
+    },
+    "7b3cd2a99361b2d9": {
+      "timestamp": "2026-11-10T21:04:14",
+      "pairs": {
+        "robot3_robot1": {
+          "pair_name": "robot3_robot1",
+          "handover_position_world": [
+            37.5,
+            -12.5,
+            387.5
+          ],
+          "standoff_distance_mm": 50.0,
+          "robot_a_id": "robot3",
+          "robot_b_id": "robot1",
+          "robot_a_handover_q_deg": [
+            86.06,
+            -36.48,
+            32.45,
+            -12.75,
+            -10.2,
+            -65.96
+          ],
+          "robot_b_handover_q_deg": [
+            -2.49,
+            -5.75,
+            -39.03,
+            19.81,
+            12.28
+          ],
+          "robot_a_pre_handover_q_deg": [
+            87.59,
+            -27.62,
+            37.27,
+            -15.05,
+            -21.98,
+            -65.96
+          ],
+          "robot_b_pre_handover_q_deg": [
+            -2.49,
+            11.41,
+            -42.56,
+            46.78,
+            12.28
+          ],
+          "handover_clearance_mm": 227.88,
+          "pre_handover_clearance_mm": 99.45,
+          "error_a_mm": 0.0,
+          "error_b_mm": 0.0,
+          "dot_z": -0.9782,
+          "dot_x": 0.0008,
+          "approach_angle_dev_deg": 11.98,
+          "approach_mode": "DUAL_SYNCHRONIZED",
+          "candidate_origin": "TOP_OF_WORKSPACE",
+          "corridor_a_valid": true,
+          "corridor_b_valid": true
+        },
+        "robot2_robot3": {
+          "pair_name": "robot2_robot3",
+          "handover_position_world": [
+            137.5,
+            37.5,
+            387.5
+          ],
+          "standoff_distance_mm": 50.0,
+          "robot_a_id": "robot2",
+          "robot_b_id": "robot3",
+          "robot_a_handover_q_deg": [
+            113.28,
+            -48.96,
+            40.11,
+            22.51,
+            58.22
+          ],
+          "robot_b_handover_q_deg": [
+            46.6,
+            17.94,
+            -21.32,
+            -26.3,
+            -14.4,
+            -70.0
+          ],
+          "robot_a_pre_handover_q_deg": [
+            101.08,
+            -49.93,
+            62.64,
+            32.27,
+            84.95
+          ],
+          "robot_b_pre_handover_q_deg": [
+            50.31,
+            25.9,
+            -18.68,
+            -27.9,
+            -15.58,
+            -70.0
+          ],
+          "handover_clearance_mm": 249.12,
+          "pre_handover_clearance_mm": 99.74,
+          "error_a_mm": 0.003,
+          "error_b_mm": 0.004,
+          "dot_z": -0.9897,
+          "dot_x": 0.0363,
+          "approach_angle_dev_deg": 8.25,
+          "approach_mode": "DUAL_SYNCHRONIZED",
+          "candidate_origin": "TOP_OF_WORKSPACE",
+          "corridor_a_valid": true,
+          "corridor_b_valid": true
+        }
+      }
     }
   }
 }

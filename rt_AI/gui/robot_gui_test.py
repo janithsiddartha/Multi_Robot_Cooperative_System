@@ -654,6 +654,24 @@ class RobotGUI(Node):
             self.available_ports_callback,
             10
         )
+        self.connected_port_subscription = self.create_subscription(
+            String,
+            'connected_port',
+            self.connected_port_callback,
+            10
+        )
+        self.robot_command_subscription = self.create_subscription(
+            String,
+            'robot_command',
+            self.robot_command_callback,
+            10
+        )
+        self.speed_subscription = self.create_subscription(
+            Int32,
+            'robot_speed',
+            self.robot_speed_callback,
+            10
+        )
 
 
         # ====================================================
@@ -1352,6 +1370,50 @@ class RobotGUI(Node):
         current_values = list(self.port_dropdown['values'])
         if current_values != ports:
             self.port_dropdown['values'] = ports
+
+    def connected_port_callback(self, msg):
+        port = msg.data.strip()
+        if port and port.upper() != "NONE":
+            self._apply_connected_port(port)
+        else:
+            self._apply_disconnected_port()
+
+    def robot_command_callback(self, msg):
+        cmd = msg.data.strip()
+        if cmd.upper().startswith("PORT,"):
+            p = cmd.split(",", 1)[1].strip()
+            if p and p.upper() != "NONE":
+                self._apply_connected_port(p)
+            else:
+                self._apply_disconnected_port()
+
+    def _apply_connected_port(self, port: str):
+        if hasattr(self, 'port_dropdown'):
+            current_values = list(self.port_dropdown['values'])
+            if port not in current_values:
+                current_values.append(port)
+                self.port_dropdown['values'] = current_values
+        if hasattr(self, 'port_var'):
+            self.port_var.set(port)
+        if hasattr(self, 'connection_lbl'):
+            self.connection_lbl.config(text="CONNECTED", fg=self.success_color)
+        if hasattr(self, 'status_label'):
+            self.status_label.config(text=f"Port set to {port}")
+
+    def _apply_disconnected_port(self):
+        if hasattr(self, 'connection_lbl'):
+            self.connection_lbl.config(text="DISCONNECTED", fg=self.danger_color)
+        if hasattr(self, 'status_label'):
+            self.status_label.config(text="Port disconnected")
+
+    def robot_speed_callback(self, msg):
+        speed = max(1, min(10, int(msg.data)))
+        if speed != self.speed:
+            self.speed = speed
+            if hasattr(self, 'speed_slider'):
+                self.speed_slider.set(speed)
+            if hasattr(self, 'speed_label'):
+                self.speed_label.config(text=f'SPEED LEVEL  {self.speed}/10')
 
 
 

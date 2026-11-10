@@ -23,7 +23,7 @@ import numpy as np
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float64MultiArray, String
+from std_msgs.msg import Float64MultiArray, String, Int32
 from ament_index_python.packages import get_package_share_directory
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -38,6 +38,8 @@ from robot_control.handover.stage3_test2 import (
 from robot_control.handover.stage3_test2_solver import (
     AutoHandoverTest2Pose,
     compute_all_test2_handover_poses,
+    compute_single_test2_handover_pose,
+    clear_test2_handover_cache,
     load_test2_handover_cache,
     resolve_test2_handover_cache_path,
 )
@@ -152,6 +154,7 @@ class Stage3Test2GUI(Stage3GUI):
 
         self.root.after(50, self._refresh_visualization)
         self._update_handover_status_card()
+        self.root.after(200, self._scan_system_serial_ports)
 
     def _init_ros_communication(self):
         """Set up ROS 2 publishers and joint subscriptions."""
@@ -176,6 +179,23 @@ class Stage3Test2GUI(Stage3GUI):
                 Float64MultiArray, f'/{rid}/trajectory_gripper_command', 10
             )
 
+        # Speed publishers for all robots
+        self.publishers_speed = {}
+        for rid in self.robots.keys():
+            self.publishers_speed[rid] = self.create_publisher(
+                Int32, f'/{rid}/robot_speed', 10
+            )
+
+        # Hardware serial command publishers & subscriptions
+        self.publishers_command = {}
+        for rid in self.robots.keys():
+            self.publishers_command[rid] = self.create_publisher(
+                String, f'/{rid}/robot_command', 10
+            )
+        self.global_command_pub = self.create_publisher(
+            String, 'robot_command', 10
+        )
+
         self.subs = []
         for rid in self.robots.keys():
             sub = self.create_subscription(
@@ -185,6 +205,53 @@ class Stage3Test2GUI(Stage3GUI):
                 10,
             )
             self.subs.append(sub)
+
+            sub_port = self.create_subscription(
+                String,
+                f'/{rid}/available_ports',
+                lambda msg, r=rid: self._on_available_ports_cb(msg, r),
+                10,
+            )
+            self.subs.append(sub_port)
+
+            sub_conn = self.create_subscription(
+                String,
+                f'/{rid}/connected_port',
+                lambda msg, r=rid: self._on_connected_port_cb(msg, r),
+                10,
+            )
+            self.subs.append(sub_conn)
+
+            sub_cmd = self.create_subscription(
+                String,
+                f'/{rid}/robot_command',
+                lambda msg, r=rid: self._on_robot_command_cb(msg, r),
+                10,
+            )
+            self.subs.append(sub_cmd)
+
+            sub_spd = self.create_subscription(
+                Int32,
+                f'/{rid}/robot_speed',
+                lambda msg, r=rid: self._on_robot_speed_cb(msg, r),
+                10,
+            )
+            self.subs.append(sub_spd)
+
+        sub_global_ports = self.create_subscription(
+            String,
+            'available_ports',
+            self._on_global_available_ports_cb,
+            10,
+        )
+        self.subs.append(sub_global_ports)
+
+        # Hardware port tracking
+        self.hw_available_ports: List[str] = []
+        self.hw_connected = {r: False for r in self.robots.keys()}
+        self.hw_assigned_port = {r: "" for r in self.robots.keys()}
+        self.hw_port_combo = {}
+        self.hw_conn_badge = {}
 
     def _load_initial_auto_handover_poses(self):
         """Load test2 auto-handover poses from JSON cache without blocking UI."""
@@ -234,8 +301,11 @@ class Stage3Test2GUI(Stage3GUI):
             except Exception as e:
                 self.get_logger().warn(f"Fallback to test cache: {e}")
 
-        self.auto_handover_poses = poses if poses is not None else {}
-        if self.auto_handover_poses:
+        if not hasattr(self, 'auto_handover_poses'):
+            self.auto_handover_poses = {}
+
+        if poses:
+            self.auto_handover_poses.update(poses)
             self.get_logger().info(f"Active test2 auto-handover pairs: {list(self.auto_handover_poses.keys())}")
 
     # =========================================================================
@@ -428,18 +498,25 @@ class Stage3Test2GUI(Stage3GUI):
             textvariable=self.selected_ho_pair,
             values=["robot1_robot2", "robot2_robot3", "robot3_robot1"],
             state="readonly",
-            width=18,
+            width=14,
             font=("Consolas", 8, "bold")
         )
-        self.pair_combobox.pack(side="left", padx=(0, 6))
+        self.pair_combobox.pack(side="left", padx=(0, 4))
         self.pair_combobox.bind("<<ComboboxSelected>>", self._on_handover_pair_selected)
 
         self.btn_reload_ho = tk.Button(
             pair_row, text="🔄 Reload", font=("Helvetica", 7, "bold"),
-            bg="#EAEDED", fg="#2C3E50", relief="flat", padx=4, pady=1, cursor="hand2",
+            bg="#EAEDED", fg="#2C3E50", relief="flat", padx=3, pady=1, cursor="hand2",
             command=self._on_reload_handover_cache
         )
-        self.btn_reload_ho.pack(side="left")
+        self.btn_reload_ho.pack(side="left", padx=(0, 2))
+
+        self.btn_clear_ho = tk.Button(
+            pair_row, text="🗑️ Clear", font=("Helvetica", 7, "bold"),
+            bg="#FDEDEC", fg="#C0392B", relief="flat", padx=3, pady=1, cursor="hand2",
+            command=self._on_clear_handover_cache
+        )
+        self.btn_clear_ho.pack(side="left")
 
         # Shared Target and Mating Info
         self.ho_target_lbl = tk.Label(
@@ -461,35 +538,54 @@ class Stage3Test2GUI(Stage3GUI):
         )
         self.ho_summary_lbl.pack(fill="x", pady=(1, 2))
 
-        # Action Buttons Row 1: Full Inspector & Recompute
-        action_row1 = tk.Frame(ho_card, bg=self.card_color)
-        action_row1.pack(fill="x", pady=1)
+        # Recompute Row: Recompute 1-2, 2-3, 3-1, and ALL
+        recomp_row = tk.Frame(ho_card, bg=self.card_color)
+        recomp_row.pack(fill="x", pady=(2, 1))
 
-        self.btn_inspect_ho = tk.Button(
-            action_row1, text="🔍 Inspect Pose Details...", font=("Helvetica", 7, "bold"),
-            bg="#2980B9", fg="#FFFFFF", relief="flat", padx=5, pady=2, cursor="hand2",
-            command=self._show_handover_inspector_dialog
+        tk.Label(
+            recomp_row, text="⚡ Recompute:", font=("Helvetica", 7, "bold"),
+            bg=self.card_color, fg="#2980B9"
+        ).pack(side="left", padx=(0, 3))
+
+        self.btn_recomp_12 = tk.Button(
+            recomp_row, text="1-2", font=("Helvetica", 7, "bold"),
+            bg="#EAF2F8", fg="#2980B9", relief="flat", padx=4, pady=1, cursor="hand2",
+            command=lambda: self._on_recompute_single_pair("robot1_robot2")
         )
-        self.btn_inspect_ho.pack(side="left", padx=(0, 4))
+        self.btn_recomp_12.pack(side="left", padx=1)
+
+        self.btn_recomp_23 = tk.Button(
+            recomp_row, text="2-3", font=("Helvetica", 7, "bold"),
+            bg="#EAF2F8", fg="#2980B9", relief="flat", padx=4, pady=1, cursor="hand2",
+            command=lambda: self._on_recompute_single_pair("robot2_robot3")
+        )
+        self.btn_recomp_23.pack(side="left", padx=1)
+
+        self.btn_recomp_31 = tk.Button(
+            recomp_row, text="3-1", font=("Helvetica", 7, "bold"),
+            bg="#EAF2F8", fg="#2980B9", relief="flat", padx=4, pady=1, cursor="hand2",
+            command=lambda: self._on_recompute_single_pair("robot3_robot1")
+        )
+        self.btn_recomp_31.pack(side="left", padx=1)
 
         self.btn_recompute_ho = tk.Button(
-            action_row1, text="⚡ Recompute (Top-WS)", font=("Helvetica", 7, "bold"),
-            bg="#EAF2F8", fg="#2980B9", relief="flat", padx=4, pady=2, cursor="hand2",
+            recomp_row, text="ALL", font=("Helvetica", 7, "bold"),
+            bg="#2980B9", fg="#FFFFFF", relief="flat", padx=5, pady=1, cursor="hand2",
             command=self._on_recompute_test2_handover_clicked
         )
-        self.btn_recompute_ho.pack(side="left")
+        self.btn_recompute_ho.pack(side="left", padx=(2, 0))
 
         self.ho_recomp_msg = tk.Label(
-            action_row1, text="✓ Cached", bg=self.card_color, fg=self.success_color, font=("Helvetica", 7, "italic")
+            recomp_row, text="✓ Cached", bg=self.card_color, fg=self.success_color, font=("Helvetica", 7, "italic")
         )
         self.ho_recomp_msg.pack(side="right")
 
-        # Action Buttons Row 2: 3D Preview Handover / Pre-Handover / Reset
+        # Action Buttons Row 2: 3D Preview Handover / Pre-Handover / Inspect / Reset (Home All)
         action_row2 = tk.Frame(ho_card, bg=self.card_color)
-        action_row2.pack(fill="x", pady=(1, 1))
+        action_row2.pack(fill="x", pady=(2, 1))
 
         self.btn_preview_ho = tk.Button(
-            action_row2, text="👁️ 3D Preview Handover", font=("Helvetica", 7, "bold"),
+            action_row2, text="👁️ Preview", font=("Helvetica", 7, "bold"),
             bg="#EAEDED", fg="#2C3E50", relief="flat", padx=4, pady=1, cursor="hand2",
             command=lambda: self._preview_handover_in_3d('handover')
         )
@@ -500,10 +596,17 @@ class Stage3Test2GUI(Stage3GUI):
             bg="#EAEDED", fg="#2C3E50", relief="flat", padx=4, pady=1, cursor="hand2",
             command=lambda: self._preview_handover_in_3d('pre_handover')
         )
-        self.btn_preview_pre.pack(side="left", padx=2)
+        self.btn_preview_pre.pack(side="left", padx=(0, 2))
+
+        self.btn_inspect_ho = tk.Button(
+            action_row2, text="🔍 Inspect...", font=("Helvetica", 7, "bold"),
+            bg="#EAEDED", fg="#2C3E50", relief="flat", padx=4, pady=1, cursor="hand2",
+            command=self._show_handover_inspector_dialog
+        )
+        self.btn_inspect_ho.pack(side="left", padx=(0, 2))
 
         self.btn_reset_preview = tk.Button(
-            action_row2, text="🏠 Reset", font=("Helvetica", 7, "bold"),
+            action_row2, text="🏠 Reset / Home All", font=("Helvetica", 7, "bold"),
             bg="#EAEDED", fg="#7F8C8D", relief="flat", padx=4, pady=1, cursor="hand2",
             command=self._reset_3d_preview
         )
@@ -525,6 +628,68 @@ class Stage3Test2GUI(Stage3GUI):
         )
         self.status_badge.pack(fill="x", pady=1)
 
+        # 3.5. PHYSICAL ROBOT PORTS (UART) CARD
+        hw_card = tk.Frame(left_frame, bg=self.card_color, padx=10, pady=4, relief="solid", bd=1)
+        hw_card.pack(fill="x", pady=2)
+
+        hw_hdr = tk.Frame(hw_card, bg=self.card_color)
+        hw_hdr.pack(fill="x", pady=(0, 2))
+        tk.Label(
+            hw_hdr, text="PHYSICAL ROBOT PORTS (UART)",
+            font=("Helvetica", 8, "bold"), fg="#2C3E50", bg=self.card_color
+        ).pack(side="left")
+        tk.Button(
+            hw_hdr, text="🔄 Scan Ports", font=("Helvetica", 7, "bold"),
+            bg="#EAEDED", fg="#2C3E50", activebackground="#D5D8DC",
+            relief="flat", cursor="hand2", padx=4, pady=0,
+            command=self._scan_system_serial_ports
+        ).pack(side="right")
+
+        robot_color_map = {
+            "robot1": ("R1", "#2980B9"),
+            "robot2": ("R2", "#E74C3C"),
+            "robot3": ("R3", "#27AE60"),
+        }
+
+        for rid in ["robot1", "robot2", "robot3"]:
+            if rid not in self.robots:
+                continue
+            lbl_name, col = robot_color_map.get(rid, (rid.upper(), "#34495E"))
+            r_row = tk.Frame(hw_card, bg=self.card_color)
+            r_row.pack(fill="x", pady=1)
+
+            tk.Label(
+                r_row, text=lbl_name, font=("Helvetica", 8, "bold"),
+                fg=col, bg=self.card_color, width=3, anchor="w"
+            ).pack(side="left")
+
+            combo = ttk.Combobox(r_row, width=15, state="readonly", font=("Helvetica", 8))
+            combo.pack(side="left", padx=(0, 3))
+            self.hw_port_combo[rid] = combo
+
+            btn_set = tk.Button(
+                r_row, text="SET", font=("Helvetica", 7, "bold"),
+                bg="#2980B9", fg="#FFFFFF", activebackground="#1B4F72", activeforeground="#FFFFFF",
+                relief="flat", cursor="hand2", padx=4, pady=0,
+                command=lambda r=rid: self._on_set_robot_port(r)
+            )
+            btn_set.pack(side="left", padx=(0, 2))
+
+            btn_disc = tk.Button(
+                r_row, text="DISC", font=("Helvetica", 7, "bold"),
+                bg="#EAEDED", fg="#7F8C8D", activebackground="#D5D8DC",
+                relief="flat", cursor="hand2", padx=3, pady=0,
+                command=lambda r=rid: self._on_disconnect_robot_port(r)
+            )
+            btn_disc.pack(side="left", padx=(0, 3))
+
+            badge = tk.Label(
+                r_row, text="DISCONNECTED", font=("Helvetica", 7, "bold"),
+                bg="#FDEDEC", fg="#C0392B", padx=3, pady=0, width=13, anchor="center"
+            )
+            badge.pack(side="right")
+            self.hw_conn_badge[rid] = badge
+
         # 4. UI TOGGLES (Clouds, TCP, Disk Cache, Clear)
         self.show_ws_var = tk.BooleanVar(value=True)
         self.show_tcp_var = tk.BooleanVar(value=True)
@@ -543,6 +708,22 @@ class Stage3Test2GUI(Stage3GUI):
         # 5. ACTION BUTTONS (SIMULATE VS EXECUTE REAL)
         action_frame = tk.Frame(left_frame, bg=self.bg_color)
         action_frame.pack(fill="x", pady=2)
+
+        # Speed Control Panel (1 to 10 matching Individual GUI & Web Twin)
+        speed_frame = tk.Frame(action_frame, bg=self.bg_color)
+        speed_frame.pack(fill="x", pady=(1, 3))
+        self.speed = 3
+        self.speed_lbl = tk.Label(
+            speed_frame, text=f"MOTION SPEED: LEVEL {self.speed} / 10",
+            font=("Helvetica", 8, "bold"), bg=self.bg_color, fg="#2C3E50"
+        )
+        self.speed_lbl.pack(side="top", anchor="w")
+        self.speed_slider = ttk.Scale(
+            speed_frame, from_=1, to=10, orient="horizontal",
+            command=self._on_speed_slider_change
+        )
+        self.speed_slider.set(self.speed)
+        self.speed_slider.pack(fill="x", pady=(1, 2))
 
         self.plan_status_lbl = tk.Label(
             action_frame, text="Plan Status: Ready to plan",
@@ -740,13 +921,111 @@ class Stage3Test2GUI(Stage3GUI):
 
         self._update_3d()
 
-    def _on_recompute_test2_handover_clicked(self):
-        """Recompute test2 handover poses using Top-of-Workspace strategy only."""
+    def _reset_3d_preview(self):
+        """Reset 3D visualizer to mechanical Home positions without clearing handover cache."""
+        self.is_previewing_handover = False
+        self.preview_q.clear()
+        for rid, cfg in self.robots.items():
+            self.live_q[rid] = np.asarray(cfg.home_deg, dtype=float).copy()
+            self.current_q[rid] = np.asarray(cfg.home_deg, dtype=float).copy()
+        self._log("🏠 [3D PREVIEW] Reset / Home All: Arms returned to mechanical Home positions.")
+        self._update_handover_status_card()
+        self._update_3d()
+
+    def _on_reload_handover_cache(self):
+        """Reload test2 handover cache from disk matching current configuration fingerprint."""
+        self._log(f"[CACHE RELOAD] Reloading test2 handover cache from {self.auto_handover_cache_path}...")
+        try:
+            poses = load_test2_handover_cache(self.auto_handover_cache_path, self.config_fingerprint)
+            if poses:
+                self.auto_handover_poses = poses
+                self.ho_recomp_msg.config(text=f"✓ Loaded ({len(poses)})", fg=self.success_color)
+                self._log(f"✓ Loaded {len(poses)} verified auto-handover pose pairs from test2 cache.")
+            else:
+                self.ho_recomp_msg.config(text="⚠️ Empty/Stale", fg=self.warning_color)
+                self._log("⚠️ No valid test2 cache found matching configuration fingerprint.")
+        except Exception as e:
+            self.ho_recomp_msg.config(text="Error", fg=self.danger_color)
+            self._log(f"ERROR reloading test2 cache: {e}")
+        self._update_handover_status_card()
+        self._update_3d()
+
+    def _on_clear_handover_cache(self):
+        """Clear cached handover poses for the active configuration fingerprint."""
+        if not messagebox.askyesno("Clear Handover Cache", "Are you sure you want to clear the cached auto-handover poses for this configuration?"):
+            return
+        clear_test2_handover_cache(self.auto_handover_cache_path, self.config_fingerprint)
+        self.auto_handover_poses = {}
+        self.ho_recomp_msg.config(text="Cache Cleared", fg=self.warning_color)
+        self._log("🗑️ Handover cache cleared for active configuration fingerprint.")
+        self._update_handover_status_card()
+        self._update_3d()
+
+    def _set_recompute_buttons_state(self, state: str):
+        for btn_name in ('btn_recomp_12', 'btn_recomp_23', 'btn_recomp_31', 'btn_recompute_ho'):
+            if hasattr(self, btn_name):
+                getattr(self, btn_name).config(state=state)
+
+    def _on_recompute_single_pair(self, pair_name: str):
+        """Recompute test2 handover pose for a single pair (Top-of-Workspace only)."""
         if getattr(self, 'is_recomputing_handover', False):
             return
 
         self.is_recomputing_handover = True
-        self.btn_recompute_ho.config(state="disabled", text="⏳ Solving...")
+        self.selected_ho_pair.set(pair_name)
+        self._set_recompute_buttons_state("disabled")
+        self.ho_recomp_msg.config(text=f"Solving {pair_name}...", fg=self.accent_color)
+        self._log(f"\n⚡ Starting Handover Recomputation for {pair_name} (Top-of-Workspace Only)...")
+
+        def progress_cb(msg: str):
+            self.root.after(0, lambda m=msg: self._log(f"  [Solver] {m}"))
+
+        def worker():
+            try:
+                pose = compute_single_test2_handover_pose(
+                    pair_name=pair_name,
+                    robots=self.robots,
+                    handover_cfg=self.handover_cfg,
+                    cache_path=self.auto_handover_cache_path,
+                    progress_callback=progress_cb,
+                )
+
+                def on_done():
+                    self.is_recomputing_handover = False
+                    self._set_recompute_buttons_state("normal")
+                    all_poses = load_test2_handover_cache(self.auto_handover_cache_path, self.config_fingerprint) or {}
+                    if pose is not None:
+                        all_poses[pair_name] = pose
+                        self.auto_handover_poses = all_poses
+                        self.ho_recomp_msg.config(text=f"✓ {pair_name} Saved", fg=self.success_color)
+                        self._log(f"✓ Recomputation complete for {pair_name}! Saved to cache.")
+                    else:
+                        self.auto_handover_poses = all_poses
+                        self.ho_recomp_msg.config(text="⚠️ No solution", fg=self.warning_color)
+                        self._log(f"⚠️ No valid Top-of-Workspace handover solution found for {pair_name}.")
+                    self._update_handover_status_card()
+                    self._update_3d()
+
+                self.root.after(0, on_done)
+            except Exception as e:
+                def on_err(err=str(e)):
+                    self.is_recomputing_handover = False
+                    self._set_recompute_buttons_state("normal")
+                    self.ho_recomp_msg.config(text="Error", fg=self.danger_color)
+                    self._log(f"ERROR recomputing handover pose for {pair_name}: {err}")
+
+                self.root.after(0, on_err)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_recompute_test2_handover_clicked(self):
+        """Recompute test2 handover poses using Top-of-Workspace strategy only for all pairs."""
+        if getattr(self, 'is_recomputing_handover', False):
+            return
+
+        self.is_recomputing_handover = True
+        self._set_recompute_buttons_state("disabled")
+        self.btn_recompute_ho.config(text="⏳ Solving...")
         self.ho_recomp_msg.config(text="Computing...", fg=self.accent_color)
         self._log("\n⚡ Starting Stage 3 Test 2 Handover Recomputation (Top-of-Workspace Only)...")
 
@@ -765,18 +1044,21 @@ class Stage3Test2GUI(Stage3GUI):
 
                 def on_done():
                     self.is_recomputing_handover = False
-                    self.auto_handover_poses = poses
-                    self.btn_recompute_ho.config(state="normal", text="⚡ Recompute (Top-WS)")
-                    self.ho_recomp_msg.config(text="✓ Saved", fg=self.success_color)
+                    self._set_recompute_buttons_state("normal")
+                    self.btn_recompute_ho.config(text="ALL")
+                    all_poses = load_test2_handover_cache(self.auto_handover_cache_path, self.config_fingerprint) or poses or {}
+                    self.auto_handover_poses = all_poses
+                    self.ho_recomp_msg.config(text=f"✓ Saved ({len(all_poses)})", fg=self.success_color)
                     self._update_handover_status_card()
                     self._update_3d()
-                    self._log(f"✓ Top-of-Workspace recomputation complete! {len(poses)} pairs saved to cache.")
+                    self._log(f"✓ Top-of-Workspace recomputation complete! {len(all_poses)} pairs saved to cache.")
 
                 self.root.after(0, on_done)
             except Exception as e:
                 def on_err(err=str(e)):
                     self.is_recomputing_handover = False
-                    self.btn_recompute_ho.config(state="normal", text="⚡ Recompute (Top-WS)")
+                    self._set_recompute_buttons_state("normal")
+                    self.btn_recompute_ho.config(text="ALL")
                     self.ho_recomp_msg.config(text="Error", fg=self.danger_color)
                     self._log(f"ERROR recomputing test2 handover poses: {err}")
 
@@ -908,27 +1190,32 @@ class Stage3Test2GUI(Stage3GUI):
                 status = "safe" if step.is_safe else "warn"
                 self._update_clearance_ui(step.min_clearance_mm, "MOTION ACTIVE", status)
                 self.root.after(0, self._update_3d)
-                time.sleep(self.step_interval_s)
+                effective_dt = max(0.015, 0.08 - (getattr(self, 'speed', 3) * 0.006))
+                time.sleep(effective_dt)
             time.sleep(dwell)
 
         if plan.needs_handover:
-            # PHASE 1: SIMULTANEOUS MOTION
+            # PHASE 0: PROACTIVE OPEN GRIPPER FOR APPROACH
+            self._send_gripper_command(pick_rid, 'open', real_robot=real_robot)
+
+            # PHASE 1: SIMULTANEOUS MOTION (Pre-Pick approach + Cartesian descent to Pick)
             step_simultaneous(
                 traj_result.phase1_simultaneous,
-                f"1. SIMULTANEOUS: {pick_rid} moves to Pick, WHILE {place_rid} moves to Pre-Handover!",
+                f"1. SIMULTANEOUS: {pick_rid} approaches Pre-Pick (+50mm) & Cartesian descends (-Z) to Pick, WHILE {place_rid} moves to Pre-Handover!",
                 dwell=self.dwell_time_s,
             )
 
             # PHASE 2: GRASP AT PICK
-            self._log(f"2. {pick_rid} waits {self.pick_wait_s}s and closes gripper. ({place_rid} waiting at Pre-Handover)")
+            self._log(f"2. {pick_rid} dwells {self.pick_wait_s}s, closes gripper (grasp), and dwells {self.pick_wait_s}s. ({place_rid} waiting at Pre-Handover)")
+            time.sleep(self.dwell_time_s)
             self._send_gripper_command(pick_rid, 'close', real_robot=real_robot)
             self._update_clearance_ui(self.live_clearance_mm, f"{place_rid} WAITING AT PRE-HANDOVER", "info")
             time.sleep(self.pick_wait_s)
 
-            # PHASE 3: PICK ROBOT MOVES TO PRE-HANDOVER
+            # PHASE 3: CARTESIAN LIFT TO PRE-PICK & TRANSIT TO PRE-HANDOVER
             step_simultaneous(
                 traj_result.phase3_pick_to_pre_handover,
-                f"3. {pick_rid} moves to Pre-Handover ({place_rid} stationed at Pre-Handover).",
+                f"3. {pick_rid} Cartesian lifts (+50mm) to Pre-Pick and transfers to Pre-Handover ({place_rid} stationed at Pre-Handover).",
                 dwell=self.dwell_time_s,
             )
 
@@ -942,44 +1229,48 @@ class Stage3Test2GUI(Stage3GUI):
             # PHASE 5: TRANSFER
             self._log(f"5. HANDOVER TRANSFER: {place_rid} closes gripper, {pick_rid} opens gripper.")
             self._send_gripper_command(place_rid, 'close', real_robot=real_robot)
-            time.sleep(0.5)
+            time.sleep(self.transfer_wait_s)
             self._send_gripper_command(pick_rid, 'open', real_robot=real_robot)
-            time.sleep(0.5)
+            time.sleep(self.transfer_wait_s)
 
             # PHASE 6: RETRACT
             step_simultaneous(
                 traj_result.phase6_retract_to_pre_handover,
-                f"6. RETRACT: Both robots retreat safely back to Pre-Handover.",
+                f"6. RETRACT: Both robots retreat safely back to Pre-Handover along reverse corridors.",
                 dwell=self.dwell_time_s,
             )
 
-            # PHASE 7: PLACE MOTION
+            # PHASE 7: PLACE MOTION (Pre-Place approach + Cartesian descent to Place)
             step_simultaneous(
                 traj_result.phase7_handover_to_place,
-                f"7. {place_rid} moves to Place Target ({pick_rid} waiting at Pre-Handover).",
+                f"7. {place_rid} transfers to Pre-Place (+50mm) & Cartesian descends (-Z) to Place Target ({pick_rid} waiting safely).",
                 dwell=self.dwell_time_s,
             )
 
             # PHASE 8: RELEASE
-            self._log(f"8. {place_rid} waits {self.pick_wait_s}s and opens gripper at Place Target.")
+            self._log(f"8. {place_rid} dwells {self.place_wait_s}s, opens gripper at Place Target, and dwells {self.place_wait_s}s.")
+            time.sleep(self.dwell_time_s)
             self._send_gripper_command(place_rid, 'open', real_robot=real_robot)
-            time.sleep(self.pick_wait_s)
+            time.sleep(self.place_wait_s)
 
-            # PHASE 9: RETURN HOME
+            # PHASE 9: CARTESIAN RETRACT TO PRE-PLACE & RETURN HOME
             step_simultaneous(
                 traj_result.phase9_simultaneous_home,
-                f"9. SIMULTANEOUS RETURN: Both {pick_rid} and {place_rid} return to Home!",
+                f"9. {place_rid} Cartesian retracts (+50mm) to Pre-Place & SIMULTANEOUS RETURN: Both {pick_rid} and {place_rid} return to Home!",
                 dwell=self.dwell_time_s,
             )
         else:
             # SINGLE ROBOT
-            step_simultaneous(traj_result.phase1_simultaneous, f"1. {pick_rid} moves to Pick Target.")
+            self._send_gripper_command(pick_rid, 'open', real_robot=real_robot)
+            step_simultaneous(traj_result.phase1_simultaneous, f"1. {pick_rid} approaches Pre-Pick (+50mm) & Cartesian descends (-Z) to Pick Target.")
+            time.sleep(self.dwell_time_s)
             self._send_gripper_command(pick_rid, 'close', real_robot=real_robot)
             time.sleep(self.pick_wait_s)
-            step_simultaneous(traj_result.phase7_handover_to_place, f"2. {pick_rid} moves to Place Target.")
+            step_simultaneous(traj_result.phase7_handover_to_place, f"2. {pick_rid} Cartesian lifts (+50mm), transfers to Pre-Place, & Cartesian descends (-Z) to Place Target.")
+            time.sleep(self.dwell_time_s)
             self._send_gripper_command(pick_rid, 'open', real_robot=real_robot)
-            time.sleep(self.pick_wait_s)
-            step_simultaneous(traj_result.phase9_simultaneous_home, f"3. {pick_rid} returns home.")
+            time.sleep(self.place_wait_s)
+            step_simultaneous(traj_result.phase9_simultaneous_home, f"3. {pick_rid} Cartesian retracts (+50mm) to Pre-Place and returns home.")
 
         self._set_control_mode(pick_rid, 'POSITION', real_robot=real_robot)
         if plan.needs_handover:
@@ -990,6 +1281,197 @@ class Stage3Test2GUI(Stage3GUI):
         self._update_clearance_ui(self.live_clearance_mm, "IDLE / READY", "safe")
         self._set_status_lbl("Task completed successfully", self.success_color)
         self._log("\n✓ Task completed successfully!")
+
+    # =========================================================================
+    # PHYSICAL ROBOT HARDWARE SERIAL PORTS (UART)
+    # =========================================================================
+
+    def _scan_system_serial_ports(self):
+        """Scan real physical serial ports and merge with ROS available_ports topics."""
+        scanned = set(self.hw_available_ports)
+        try:
+            import serial.tools.list_ports
+            for p in serial.tools.list_ports.comports():
+                if any(k in p.device for k in ["USB", "ACM", "COM", "robot"]):
+                    scanned.add(p.device)
+        except Exception as e:
+            self.get_logger().warn(f"Port scan error: {e}")
+
+        if os.path.isdir("/dev"):
+            for item in os.listdir("/dev"):
+                if item.startswith(("ttyUSB", "ttyACM", "robot")):
+                    scanned.add(f"/dev/{item}")
+
+        ports = sorted(list(scanned))
+        self.hw_available_ports = ports
+        for rid, combo in self.hw_port_combo.items():
+            r_ports = getattr(self, 'hw_robot_ports', {}).get(rid, [])
+            vals = r_ports if r_ports else ports
+            combo["values"] = vals if vals else ["No devices"]
+            if vals and (combo.get() not in vals or combo.get() == "No devices"):
+                combo.set(vals[0])
+            elif not vals:
+                combo.set("No devices")
+
+        if ports:
+            self._log(f"✓ Ports available ({len(ports)}): {', '.join(ports)}")
+        else:
+            self._log("ℹ️ Scanning for active robot serial ports on ROS /available_ports...")
+
+    def _update_robot_port_dropdown(self, rid: str, ports: List[str]):
+        """Update combobox for a specific robot when available_ports arrives from ROS."""
+        if not hasattr(self, 'hw_robot_ports'):
+            self.hw_robot_ports = {r: [] for r in self.robots.keys()}
+        self.hw_robot_ports[rid] = ports
+
+        # Merge with overall ports
+        all_known = set(self.hw_available_ports)
+        for p in ports:
+            all_known.add(p)
+        self.hw_available_ports = sorted(list(all_known))
+
+        combo = self.hw_port_combo.get(rid)
+        if not combo:
+            return
+
+        current_val = combo.get()
+        new_values = ports if ports else (self.hw_available_ports if self.hw_available_ports else ["No devices"])
+        if list(combo["values"]) != new_values:
+            combo["values"] = new_values
+
+        if ports:
+            if current_val in ports:
+                combo.set(current_val)
+            elif self.hw_assigned_port.get(rid) in ports:
+                combo.set(self.hw_assigned_port[rid])
+            else:
+                combo.set(ports[0])
+        elif current_val not in new_values:
+            combo.set(new_values[0])
+
+    def _joint_cb(self, msg: Float64MultiArray, rid: str):
+        if rid in self.robots and len(msg.data) == self.robots[rid].num_joints:
+            new_q = np.array(msg.data, dtype=float)
+            if self.is_previewing_handover and np.linalg.norm(new_q - self.live_q[rid]) > 0.5:
+                self.is_previewing_handover = False
+                self.preview_q.clear()
+            self.live_q[rid] = new_q
+            self.has_live_q[rid] = True
+
+    def _on_speed_slider_change(self, val):
+        s = int(float(val))
+        if s != getattr(self, 'speed', 3):
+            self.speed = s
+            if hasattr(self, 'speed_lbl'):
+                self.speed_lbl.config(text=f"MOTION SPEED: LEVEL {self.speed} / 10")
+            msg = Int32()
+            msg.data = self.speed
+            for rid, pub in getattr(self, 'publishers_speed', {}).items():
+                pub.publish(msg)
+
+    def _on_robot_speed_cb(self, msg, rid: str):
+        s = max(1, min(10, int(msg.data)))
+        if s != getattr(self, 'speed', 3):
+            self.speed = s
+            self.root.after(0, self._apply_speed_ui)
+
+    def _apply_speed_ui(self):
+        if hasattr(self, 'speed_slider'):
+            self.speed_slider.set(self.speed)
+        if hasattr(self, 'speed_lbl'):
+            self.speed_lbl.config(text=f"MOTION SPEED: LEVEL {self.speed} / 10")
+
+    def _on_connected_port_cb(self, msg, rid: str):
+        port = msg.data.strip()
+        connected = bool(port and port.upper() != "NONE")
+        self.root.after(0, lambda r=rid, c=connected, p=(port if connected else ""): self._apply_robot_port_state(r, c, p))
+
+    def _on_robot_command_cb(self, msg, rid: str):
+        cmd = msg.data.strip()
+        if cmd.upper().startswith("PORT,"):
+            p = cmd.split(",", 1)[1].strip()
+            connected = bool(p and p.upper() != "NONE")
+            self.root.after(0, lambda r=rid, c=connected, port=(p if connected else ""): self._apply_robot_port_state(r, c, port))
+
+    def _apply_robot_port_state(self, rid: str, connected: bool, port: str):
+        self.hw_connected[rid] = connected
+        self.hw_assigned_port[rid] = port
+        combo = self.hw_port_combo.get(rid)
+        if combo and port:
+            current_vals = list(combo["values"])
+            if port not in current_vals:
+                current_vals.append(port)
+                combo["values"] = current_vals
+            combo.set(port)
+        self._set_connection_badge(rid, connected, port)
+
+    def _on_available_ports_cb(self, msg, rid: str):
+        raw = msg.data.strip()
+        ports = [p.strip() for p in raw.split(",") if p.strip()] if (raw and raw != "NONE") else []
+        self.root.after(0, lambda r=rid, p=ports: self._update_robot_port_dropdown(r, p))
+
+    def _on_global_available_ports_cb(self, msg):
+        raw = msg.data.strip()
+        ports = [p.strip() for p in raw.split(",") if p.strip()] if (raw and raw != "NONE") else []
+        if ports:
+            self.root.after(0, lambda p=ports: self._apply_global_available_ports(p))
+
+    def _apply_global_available_ports(self, ports: List[str]):
+        all_known = set(self.hw_available_ports)
+        for p in ports:
+            all_known.add(p)
+        self.hw_available_ports = sorted(list(all_known))
+        for rid, combo in self.hw_port_combo.items():
+            r_ports = getattr(self, 'hw_robot_ports', {}).get(rid, [])
+            vals = r_ports if r_ports else self.hw_available_ports
+            combo["values"] = vals if vals else ["No devices"]
+            if vals and (combo.get() not in vals or combo.get() == "No devices"):
+                combo.set(vals[0])
+
+    def _on_set_robot_port(self, rid: str):
+        combo = self.hw_port_combo.get(rid)
+        if not combo:
+            return
+        selected = combo.get().strip()
+        if not selected or selected == "No devices":
+            self._log(f"⚠️ Cannot connect {rid.upper()}: No valid serial port selected.")
+            return
+
+        msg = String()
+        msg.data = f"PORT,{selected}"
+        if rid in self.publishers_command:
+            self.publishers_command[rid].publish(msg)
+        if hasattr(self, "global_command_pub"):
+            self.global_command_pub.publish(msg)
+
+        self.hw_connected[rid] = True
+        self.hw_assigned_port[rid] = selected
+        self._set_connection_badge(rid, True, selected)
+        self._log(f"🔌 [{rid.upper()}] Bound to serial port: {selected} (CONNECTED)")
+
+    def _on_disconnect_robot_port(self, rid: str):
+        msg = String()
+        msg.data = "PORT,NONE"
+        if rid in self.publishers_command:
+            self.publishers_command[rid].publish(msg)
+        if hasattr(self, "global_command_pub"):
+            self.global_command_pub.publish(msg)
+
+        self.hw_connected[rid] = False
+        self.hw_assigned_port[rid] = ""
+        self._set_connection_badge(rid, False)
+        self._log(f"🔌 [{rid.upper()}] Port disconnected.")
+
+    def _set_connection_badge(self, rid: str, connected: bool, port: str = ""):
+        badge = self.hw_conn_badge.get(rid)
+        if not badge:
+            return
+        if connected:
+            dev_name = os.path.basename(port) if port else ""
+            txt = f"CONN ({dev_name})" if dev_name else "CONNECTED"
+            badge.config(text=txt, bg="#E8F8F5", fg="#27AE60")
+        else:
+            badge.config(text="DISCONNECTED", bg="#FDEDEC", fg="#C0392B")
 
 
 def main(args=None):

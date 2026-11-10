@@ -186,6 +186,7 @@ class WebTwinScene {
     });
     this.hoRing = new THREE.Mesh(hoRingGeo, hoRingMat);
     this.hoRing.position.set(37.5, 37.5, 362.5);
+    this.hoRing.visible = false; // Hide floating torus to prevent visual clutter and arm intersection
     this.scene.add(this.hoRing);
   }
 
@@ -257,35 +258,10 @@ class WebTwinScene {
   }
 
   _initWorkpiece() {
-    // 3D Workpiece Cylinder with Chamfered Brass Accent Ring
+    // Workpiece placeholder group (hidden per user preference)
     this.workpiece = new THREE.Group();
     this.workpiece.name = 'physical_workpiece';
-
-    const cylGeo = new THREE.CylinderGeometry(14, 14, 38, 32);
-    const cylMat = new THREE.MeshStandardMaterial({
-      color: 0xE2E8F0,
-      metalness: 0.9,
-      roughness: 0.2,
-    });
-    const cylMesh = new THREE.Mesh(cylGeo, cylMat);
-    cylMesh.rotation.x = Math.PI / 2; // Standing vertical along Z axis
-    cylMesh.castShadow = true;
-    this.workpiece.add(cylMesh);
-
-    // Center Accent Ring
-    const bandGeo = new THREE.CylinderGeometry(14.8, 14.8, 8, 32);
-    const bandMat = new THREE.MeshStandardMaterial({
-      color: 0xFFB800,
-      metalness: 0.8,
-      roughness: 0.25,
-    });
-    const bandMesh = new THREE.Mesh(bandGeo, bandMat);
-    bandMesh.rotation.x = Math.PI / 2;
-    this.workpiece.add(bandMesh);
-
-    // Initial position on table at Pick target: [-200, 150, 19]
-    this.workpiece.position.set(-200, 150, 19);
-    this.scene.add(this.workpiece);
+    this.workpiece.visible = false;
   }
 
   /**

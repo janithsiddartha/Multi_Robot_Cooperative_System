@@ -19,6 +19,12 @@ from robot_control.handover.stage1 import (
     generate_interpolated_path,
     load_stage1_robots,
 )
+from robot_control.handover.handover_ik import (
+    geometric_jacobian_and_fk,
+    rotation_error_vector,
+)
+from robot_control.handover.object_pick_ik import solve_object_pick_ik
+from robot_control.handover.stage1_ik import solve_stage1_ik, world_to_base
 from robot_control.kinematics.fk_math import all_frame_positions
 
 
@@ -318,6 +324,119 @@ def generate_cartesian_corridor_trajectory(
     return True, approach_qs_deg, "Success (backwards continuous corridor)"
 
 
+def compute_cartesian_linear_path(
+    q_start_deg: np.ndarray,
+    target_xyz: np.ndarray,
+    config: Any,
+    num_steps: int = 15,
+    frame: str = "base",
+) -> Optional[List[np.ndarray]]:
+    """Straight-line Cartesian approach/depart using Jacobian IK tracking with locked orientation.
+
+    At every interpolated step the TCP position is moved linearly from the
+    current FK position to *target_xyz* while the TCP orientation captured
+    at q_start_deg is kept constant (damped-least-squares Jacobian update).
+
+    Returns a list of joint-angle arrays in DEGREES, or None if IK fails.
+    """
+    q = np.deg2rad(np.asarray(q_start_deg, dtype=float))
+    q_min = config.joint_limits_rad[:, 0]
+    q_max = config.joint_limits_rad[:, 1]
+
+    # Convert to base frame if specified in world frame
+    p_target = np.asarray(target_xyz, dtype=float)
+    if frame == "world":
+        p_target = world_to_base(p_target, config)
+
+    # Capture starting TCP pose (position + orientation to freeze)
+    _, p_start, R_start = geometric_jacobian_and_fk(q, config)
+
+    # Use 5-DOF weight: heavily weight position, lightly weight orientation
+    is_5dof = config.num_joints == 5
+    if is_5dof:
+        W = np.diag([1.0, 1.0, 1.0, 0.01, 0.01, 0.01])
+    else:
+        W = np.eye(6)
+
+    path_deg = []
+    for step in range(1, num_steps + 1):
+        t = step / num_steps
+        p_interp = p_start + t * (p_target - p_start)   # linear XYZ interpolation
+
+        for _ in range(30):
+            J, p_cur, R_cur = geometric_jacobian_and_fk(q, config)
+            e_p = p_interp - p_cur
+            e_R = rotation_error_vector(R_cur, R_start)
+            e = np.concatenate([e_p, e_R])
+
+            U, S, Vt = np.linalg.svd(J, full_matrices=False)
+            sigma_min = S[-1]
+            lam = 0.01 if sigma_min >= 0.01 else min(0.2, 0.01 + 0.1 * (1.0 - sigma_min / 0.01) ** 2)
+
+            if is_5dof:
+                H = J.T @ W @ J + (lam ** 2) * np.eye(config.num_joints)
+                dq = np.linalg.solve(H, J.T @ W @ e)
+            else:
+                H = J.T @ J + (lam ** 2) * np.eye(config.num_joints)
+                dq = np.linalg.solve(H, J.T @ e)
+
+            q = np.clip(q + 0.6 * dq, q_min, q_max)
+            if np.linalg.norm(e_p) < 0.5:
+                break
+
+        path_deg.append(np.rad2deg(q).copy())
+
+    _, p_final, _ = geometric_jacobian_and_fk(q, config)
+    if np.linalg.norm(p_final - p_target) > 5.0:
+        return None
+    return path_deg
+
+
+def resolve_target_pre_pose(
+    robot_id: str,
+    cfg: Any,
+    target_xyz_world: np.ndarray,
+    yaw_deg: float = 0.0,
+    approach_height_mm: float = 50.0,
+    seed_q_deg: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Resolve Pre-Target XYZ and joint angles (+50mm approach height).
+    
+    Returns (pre_xyz_world, pre_xyz_base, pre_q_deg).
+    """
+    pre_xyz_w = np.array(target_xyz_world, dtype=float).copy()
+    pre_xyz_w[2] += approach_height_mm
+    pre_xyz_b = world_to_base(pre_xyz_w, cfg)
+    
+    seed = seed_q_deg if seed_q_deg is not None else np.zeros(cfg.num_joints)
+    
+    # 1. Try object_pick_ik with yaw
+    try:
+        res = solve_object_pick_ik(
+            robot_id,
+            pre_xyz_b[0], pre_xyz_b[1], pre_xyz_b[2],
+            object_yaw_deg=yaw_deg,
+            config=cfg,
+            current_q=seed,
+            frame='base'
+        )
+        if res.success:
+            return pre_xyz_w, pre_xyz_b, res.q_deg.copy()
+    except Exception:
+        pass
+        
+    # 2. Fallback to stage1_ik
+    try:
+        fb = solve_stage1_ik(robot_id, pre_xyz_w, cfg, current_q_deg=seed)
+        if fb is not None:
+            return pre_xyz_w, pre_xyz_b, fb.q_deg.copy()
+    except Exception:
+        pass
+        
+    # 3. Default fallback to seed
+    return pre_xyz_w, pre_xyz_b, seed.copy()
+
+
 def schedule_collision_aware_motion(
     start_pick_q: np.ndarray,
     target_pick_q: np.ndarray,
@@ -484,45 +603,80 @@ def plan_stage1_5_synchronized_paths(
     start_pick_q = current_q.get(pick_rid, np.zeros(cfg_pick.num_joints)).copy()
     start_place_q = current_q.get(place_rid, np.zeros(cfg_place.num_joints)).copy()
 
-    if not plan.needs_handover:
-        # Single robot operation: start -> pick -> place -> home
-        path_pick = generate_interpolated_path(start_pick_q, plan.pick.q_deg, steps=steps)
-        path_place = generate_interpolated_path(plan.pick.q_deg, plan.place.q_deg, steps=steps)
-        path_home = generate_interpolated_path(plan.place.q_deg, np.zeros(cfg_pick.num_joints), steps=steps)
+    # -------------------------------------------------------------
+    # INDUSTRIAL PRE-TARGET & CARTESIAN STRAIGHT-LINE SETUP (+50mm)
+    # -------------------------------------------------------------
+    pick_xyz_w = np.asarray(getattr(plan.pick, 'xyz_world', None) if getattr(plan.pick, 'xyz_world', None) is not None else [100.0, 100.0, 200.0], dtype=float)
+    pick_xyz_b = np.asarray(getattr(plan.pick, 'xyz_base', None) if getattr(plan.pick, 'xyz_base', None) is not None else world_to_base(pick_xyz_w, cfg_pick), dtype=float)
+    pick_yaw = float(getattr(plan.pick, 'requested_yaw_deg', 0.0) or 0.0)
 
-        p1_steps = [
-            Stage1_5Step(
-                name="single_pick",
-                pick_q=np.asarray(q, dtype=float).copy(),
-                place_q=np.asarray(q, dtype=float).copy(),
-                min_clearance_mm=float("inf"),
-                is_safe=True,
-                description=f"{pick_rid} moving to Pick",
-            )
-            for q in path_pick
-        ]
-        p5_steps = [
-            Stage1_5Step(
-                name="single_place",
-                pick_q=np.asarray(q, dtype=float).copy(),
-                place_q=np.asarray(q, dtype=float).copy(),
-                min_clearance_mm=float("inf"),
-                is_safe=True,
-                description=f"{pick_rid} moving to Place",
-            )
-            for q in path_place
-        ]
-        p7_steps = [
-            Stage1_5Step(
-                name="single_home",
-                pick_q=np.asarray(q, dtype=float).copy(),
-                place_q=np.asarray(q, dtype=float).copy(),
-                min_clearance_mm=float("inf"),
-                is_safe=True,
-                description=f"{pick_rid} returning Home",
-            )
-            for q in path_home
-        ]
+    place_xyz_w = np.asarray(getattr(plan.place, 'xyz_world', None) if getattr(plan.place, 'xyz_world', None) is not None else [0.0, 150.0, 150.0], dtype=float)
+    place_xyz_b = np.asarray(getattr(plan.place, 'xyz_base', None) if getattr(plan.place, 'xyz_base', None) is not None else world_to_base(place_xyz_w, cfg_place), dtype=float)
+    place_yaw = float(getattr(plan.place, 'requested_yaw_deg', 0.0) or 0.0)
+
+    app_h_pick = float(getattr(cfg_pick, 'approach_height', 50.0))
+    app_h_place = float(getattr(cfg_place, 'approach_height', 50.0))
+    num_cart_steps = max(8, steps // 2)
+
+    # 1. Pre-Pick & Cartesian Descent/Lift
+    pre_pick_w, pre_pick_b, pre_pick_q = resolve_target_pre_pose(
+        pick_rid, cfg_pick, pick_xyz_w, yaw_deg=pick_yaw, approach_height_mm=app_h_pick, seed_q_deg=start_pick_q
+    )
+    cart_descent_pick = compute_cartesian_linear_path(pre_pick_q, pick_xyz_b, cfg_pick, num_steps=num_cart_steps)
+    if cart_descent_pick is None:
+        cart_descent_pick = generate_interpolated_path(pre_pick_q, plan.pick.q_deg, steps=num_cart_steps)
+    actual_pick_q = cart_descent_pick[-1].copy()
+
+    cart_lift_pick = compute_cartesian_linear_path(actual_pick_q, pre_pick_b, cfg_pick, num_steps=num_cart_steps)
+    if cart_lift_pick is None:
+        cart_lift_pick = generate_interpolated_path(actual_pick_q, pre_pick_q, steps=num_cart_steps)
+
+    # 2. Pre-Place & Cartesian Descent/Retract
+    place_pre_h_q_temp = getattr(plan, 'place_pre_handover_q', None)
+    if place_pre_h_q_temp is None:
+        place_pre_h_q_temp = getattr(plan, 'place_handover_q', None)
+    seed_place = place_pre_h_q_temp if plan.needs_handover else actual_pick_q
+
+    pre_place_w, pre_place_b, pre_place_q = resolve_target_pre_pose(
+        place_rid, cfg_place, place_xyz_w, yaw_deg=place_yaw, approach_height_mm=app_h_place, seed_q_deg=seed_place
+    )
+    cart_descent_place = compute_cartesian_linear_path(pre_place_q, place_xyz_b, cfg_place, num_steps=num_cart_steps)
+    if cart_descent_place is None:
+        cart_descent_place = generate_interpolated_path(pre_place_q, plan.place.q_deg, steps=num_cart_steps)
+    actual_place_q = cart_descent_place[-1].copy()
+
+    cart_retract_place = compute_cartesian_linear_path(actual_place_q, pre_place_b, cfg_place, num_steps=num_cart_steps)
+    if cart_retract_place is None:
+        cart_retract_place = generate_interpolated_path(actual_place_q, pre_place_q, steps=num_cart_steps)
+
+    if not plan.needs_handover:
+        home_q = np.array(getattr(cfg_pick, 'home_deg', [0.0]*cfg_pick.num_joints), dtype=float)
+
+        # Phase 1: Transit to Pre-Pick + Cartesian Straight-Line Descent to Pick
+        path_approach_pre = generate_interpolated_path(start_pick_q, pre_pick_q, steps=steps)
+        p1_steps = []
+        for q in path_approach_pre:
+            p1_steps.append(Stage1_5Step("single_pre_pick", q.copy(), q.copy(), float("inf"), True, f"{pick_rid} approaching Pre-Pick (+{app_h_pick:.0f}mm)"))
+        for q in cart_descent_pick:
+            p1_steps.append(Stage1_5Step("single_cartesian_descent", q.copy(), q.copy(), float("inf"), True, f"{pick_rid} Cartesian vertical descent to Pick (-Z)"))
+
+        # Phase 7: Cartesian Lift to Pre-Pick + Transfer to Pre-Place + Cartesian Descent to Place
+        path_transfer = generate_interpolated_path(pre_pick_q, pre_place_q, steps=steps)
+        p7_steps = []
+        for q in cart_lift_pick:
+            p7_steps.append(Stage1_5Step("single_cartesian_lift", q.copy(), q.copy(), float("inf"), True, f"{pick_rid} Cartesian vertical lift (+{app_h_pick:.0f}mm)"))
+        for q in path_transfer:
+            p7_steps.append(Stage1_5Step("single_transfer_pre_place", q.copy(), q.copy(), float("inf"), True, f"{pick_rid} transferring to Pre-Place"))
+        for q in cart_descent_place:
+            p7_steps.append(Stage1_5Step("single_cartesian_descent_place", q.copy(), q.copy(), float("inf"), True, f"{pick_rid} Cartesian vertical descent to Place (-Z)"))
+
+        # Phase 9: Cartesian Retract to Pre-Place + Return Home
+        path_home = generate_interpolated_path(pre_place_q, home_q, steps=steps)
+        p9_steps = []
+        for q in cart_retract_place:
+            p9_steps.append(Stage1_5Step("single_cartesian_retract", q.copy(), q.copy(), float("inf"), True, f"{pick_rid} Cartesian vertical retraction (+{app_h_place:.0f}mm)"))
+        for q in path_home:
+            p9_steps.append(Stage1_5Step("single_home", q.copy(), q.copy(), float("inf"), True, f"{pick_rid} returning Home"))
 
         return Stage1_5TrajectoryResult(
             needs_handover=False,
@@ -532,8 +686,8 @@ def plan_stage1_5_synchronized_paths(
             phase3_pick_to_pre_handover=[],
             phase4_advance_to_handover=[],
             phase6_retract_to_pre_handover=[],
-            phase7_handover_to_place=p5_steps,
-            phase9_simultaneous_home=p7_steps,
+            phase7_handover_to_place=p7_steps,
+            phase9_simultaneous_home=p9_steps,
             min_overall_clearance_mm=float("inf"),
             all_phases_safe=True,
             collision_avoidance_applied=False,
@@ -544,17 +698,17 @@ def plan_stage1_5_synchronized_paths(
     place_h_q = plan.place_handover_q
     pick_pre_h_q = plan.pick_pre_handover_q if plan.pick_pre_handover_q is not None else pick_h_q
     place_pre_h_q = plan.place_pre_handover_q if plan.place_pre_handover_q is not None else place_h_q
-    pick_target_q = plan.pick.q_deg
-    place_target_q = plan.place.q_deg
+    pick_target_q = actual_pick_q
+    place_target_q = actual_place_q
 
     # ─────────────────────────────────────────────────────────────
     # PHASE 1: INDEPENDENT TASK MOTION WITH COLLISION-AWARE SCHEDULING
-    # Pick robot -> pick target, Place robot -> pre-handover
+    # Pick robot -> Pre-Pick & Cartesian Descent, Place robot -> Pre-Handover
     # ─────────────────────────────────────────────────────────────
     collision_avoidance_applied = False
-    phase1_steps, min_p1_clearance, p1_avoided = schedule_collision_aware_motion(
+    phase1_pre_steps, min_p1_clearance, p1_avoided = schedule_collision_aware_motion(
         start_pick_q=start_pick_q,
-        target_pick_q=pick_target_q,
+        target_pick_q=pre_pick_q,
         start_place_q=start_place_q,
         target_place_q=place_pre_h_q,
         cfg_pick=cfg_pick,
@@ -564,22 +718,55 @@ def plan_stage1_5_synchronized_paths(
         pick_rid=pick_rid,
         place_rid=place_rid,
         phase_name="phase1_simultaneous",
-        desc_concurrent=f"Concurrent: {pick_rid}->Pick, {place_rid}->Pre-Handover",
-        desc_serialized_pick_first="Serialized (Pick first)",
-        desc_serialized_place_first="Serialized (Place first)",
+        desc_concurrent=f"Concurrent: {pick_rid}->Pre-Pick, {place_rid}->Pre-Handover",
+        desc_serialized_pick_first="Serialized (Pre-Pick first)",
+        desc_serialized_place_first="Serialized (Pre-Handover first)",
     )
     if p1_avoided:
         collision_avoidance_applied = True
 
+    phase1_steps = list(phase1_pre_steps)
+    for q_p in cart_descent_pick:
+        c = compute_min_body_clearance(q_p, cfg_pick, place_pre_h_q, cfg_place, exclude_tcp=False)
+        if c < min_p1_clearance:
+            min_p1_clearance = c
+        phase1_steps.append(
+            Stage1_5Step(
+                name="phase1_cartesian_descent",
+                pick_q=q_p,
+                place_q=place_pre_h_q,
+                min_clearance_mm=c,
+                is_safe=c >= safe_distance,
+                description=f"{pick_rid} Cartesian vertical descent to Pick ({place_rid} waiting at Pre-Handover)",
+            )
+        )
+
     # ─────────────────────────────────────────────────────────────
-    # PHASE 3: PICK TO PRE-HANDOVER
-    # Robot 1: pick_target -> pick_pre_h_q
+    # PHASE 3: CARTESIAN LIFT TO PRE-PICK & TRANSIT TO PRE-HANDOVER
+    # Robot 1: actual_pick_q -> pre_pick_q (Cartesian Lift) -> pick_pre_h_q
     # Robot 2: waiting stationed at place_pre_h_q
     # ─────────────────────────────────────────────────────────────
-    raw_p3_pick = generate_interpolated_path(pick_target_q, pick_pre_h_q, steps=steps)
     phase3_steps = []
     min_p3_clearance = float("inf")
 
+    # 1. Cartesian Lift
+    for q_p in cart_lift_pick:
+        c = compute_min_body_clearance(q_p, cfg_pick, place_pre_h_q, cfg_place, exclude_tcp=False)
+        if c < min_p3_clearance:
+            min_p3_clearance = c
+        phase3_steps.append(
+            Stage1_5Step(
+                name="phase3_cartesian_lift",
+                pick_q=q_p,
+                place_q=place_pre_h_q,
+                min_clearance_mm=c,
+                is_safe=c >= safe_distance,
+                description=f"{pick_rid} Cartesian vertical lift (+{app_h_pick:.0f}mm)",
+            )
+        )
+
+    # 2. Joint space transit from Pre-Pick to Pre-Handover
+    raw_p3_pick = generate_interpolated_path(pre_pick_q, pick_pre_h_q, steps=steps)
     for q_p in raw_p3_pick:
         c = compute_min_body_clearance(q_p, cfg_pick, place_pre_h_q, cfg_place, exclude_tcp=False)
         if c < min_p3_clearance:
@@ -675,11 +862,11 @@ def plan_stage1_5_synchronized_paths(
         )
 
     # ─────────────────────────────────────────────────────────────
-    # PHASE 7: PRE-HANDOVER TO PLACE TARGET
-    # Robot 2: place_pre_h_q -> place_target_q
+    # PHASE 7: PRE-HANDOVER TO PRE-PLACE & CARTESIAN DESCENT TO PLACE TARGET
+    # Robot 2: place_pre_h_q -> pre_place_q -> actual_place_q
     # Robot 1: waiting stationed at pick_pre_h_q (or designated safe waiting pose)
     # ─────────────────────────────────────────────────────────────
-    raw_p7_place = generate_interpolated_path(place_pre_h_q, place_target_q, steps=steps)
+    raw_p7_place = generate_interpolated_path(place_pre_h_q, pre_place_q, steps=steps)
     phase7_steps = []
     min_p7_clearance = float("inf")
 
@@ -700,12 +887,12 @@ def plan_stage1_5_synchronized_paths(
                 min_p7_clearance = c
             phase7_steps.append(
                 Stage1_5Step(
-                    name="phase7_handover_to_place",
+                    name="phase7_handover_to_pre_place",
                     pick_q=pick_pre_h_q,
                     place_q=q_pl,
                     min_clearance_mm=c,
                     is_safe=c >= safe_distance,
-                    description=f"{place_rid} moving from Pre-Handover to Place ({pick_rid} waiting at Pre-Handover)",
+                    description=f"{place_rid} moving from Pre-Handover to Pre-Place ({pick_rid} waiting at Pre-Handover)",
                 )
             )
     else:
@@ -721,7 +908,7 @@ def plan_stage1_5_synchronized_paths(
                 min_p7_clearance = c
             phase7_steps.append(
                 Stage1_5Step(
-                    name="phase7_handover_to_place",
+                    name="phase7_pick_retire",
                     pick_q=q_p,
                     place_q=place_pre_h_q,
                     min_clearance_mm=c,
@@ -730,32 +917,68 @@ def plan_stage1_5_synchronized_paths(
                 )
             )
 
-        # Step 2: place_robot moves to place target while pick_robot waits at safe waiting pose
+        # Step 2: place_robot moves to pre-place while pick_robot waits at safe waiting pose
         for q_pl in raw_p7_place:
             c = compute_min_body_clearance(home_pick, cfg_pick, q_pl, cfg_place, exclude_tcp=False)
             if c < min_p7_clearance:
                 min_p7_clearance = c
             phase7_steps.append(
                 Stage1_5Step(
-                    name="phase7_handover_to_place",
+                    name="phase7_handover_to_pre_place",
                     pick_q=home_pick,
                     place_q=q_pl,
                     min_clearance_mm=c,
                     is_safe=c >= safe_distance,
-                    description=f"{place_rid} moving from Pre-Handover to Place ({pick_rid} waiting at safe pose)",
+                    description=f"{place_rid} moving to Pre-Place ({pick_rid} waiting at safe pose)",
                 )
             )
 
+    # Cartesian Descent to Place Target
+    for q_pl in cart_descent_place:
+        c = compute_min_body_clearance(pick_end_q_p7, cfg_pick, q_pl, cfg_place, exclude_tcp=False)
+        if c < min_p7_clearance:
+            min_p7_clearance = c
+        phase7_steps.append(
+            Stage1_5Step(
+                name="phase7_cartesian_descent_place",
+                pick_q=pick_end_q_p7,
+                place_q=q_pl,
+                min_clearance_mm=c,
+                is_safe=c >= safe_distance,
+                description=f"{place_rid} Cartesian vertical descent to Place (-Z)",
+            )
+        )
+
     # ─────────────────────────────────────────────────────────────
-    # PHASE 9: INDEPENDENT RETURN HOME WITH COLLISION-AWARE SCHEDULING
-    # Robot 1: pick_end_q_p7 -> 0
-    # Robot 2: place_target_q -> 0
+    # PHASE 9: CARTESIAN RETRACT TO PRE-PLACE & RETURN HOME
+    # Robot 1: pick_end_q_p7 -> home_pick
+    # Robot 2: actual_place_q -> pre_place_q -> home_place
     # ─────────────────────────────────────────────────────────────
+    phase9_steps = []
+    min_p9_clearance = float("inf")
+
+    # 1. Cartesian Retract
+    for q_pl in cart_retract_place:
+        c = compute_min_body_clearance(pick_end_q_p7, cfg_pick, q_pl, cfg_place, exclude_tcp=False)
+        if c < min_p9_clearance:
+            min_p9_clearance = c
+        phase9_steps.append(
+            Stage1_5Step(
+                name="phase9_cartesian_retract",
+                pick_q=pick_end_q_p7,
+                place_q=q_pl,
+                min_clearance_mm=c,
+                is_safe=c >= safe_distance,
+                description=f"{place_rid} Cartesian vertical retract (+{app_h_place:.0f}mm)",
+            )
+        )
+
+    # 2. Both robots return to Home
     home_place = np.zeros(cfg_place.num_joints)
-    phase9_steps, min_p9_clearance, p9_avoided = schedule_collision_aware_motion(
+    p9_ret_steps, min_p9_ret_c, p9_avoided = schedule_collision_aware_motion(
         start_pick_q=pick_end_q_p7,
         target_pick_q=home_pick,
-        start_place_q=place_target_q,
+        start_place_q=pre_place_q,
         target_place_q=home_place,
         cfg_pick=cfg_pick,
         cfg_place=cfg_place,
@@ -770,6 +993,9 @@ def plan_stage1_5_synchronized_paths(
     )
     if p9_avoided:
         collision_avoidance_applied = True
+    if min_p9_ret_c < min_p9_clearance:
+        min_p9_clearance = min_p9_ret_c
+    phase9_steps.extend(p9_ret_steps)
 
     overall_min = min(
         min_p1_clearance,

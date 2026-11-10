@@ -1116,3 +1116,92 @@ h1.brand-title {
   border: 1px solid rgba(255, 184, 0, 0.4);
 }
 
+/* ============================================================
+   ALWAYS-VISIBLE FLEET HARDWARE STATUS & PORT BAR
+   ============================================================ */
+#fleet-hardware-bar {
+  background: rgba(10, 15, 26, 0.95);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 6px 16px;
+  backdrop-filter: blur(16px);
+  z-index: 50;
+}
+
+.fleet-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow-x: auto;
+}
+
+.fleet-port-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+}
+
+.fleet-robot-label {
+  font-family: var(--font-heading);
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fleet-port-select {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 4px;
+  outline: none;
+  min-width: 110px;
+}
+
+.fleet-port-select:focus {
+  border-color: var(--robot1-cyan);
+}
+
+.btn-xs {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.jogger-step-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.jogger-step-btn:hover {
+  background: rgba(0, 240, 255, 0.2);
+  color: var(--robot1-cyan);
+  border-color: var(--robot1-cyan);
+}
+
+.btn-nudge-xyz {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  padding: 4px 0;
+  text-align: center;
+}
+
+

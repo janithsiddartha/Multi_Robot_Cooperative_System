@@ -13,6 +13,7 @@ Provides:
 
 import asyncio
 import json
+import math
 import os
 import sys
 import traceback
@@ -28,9 +29,10 @@ SRC_ROBOT_CONTROL = os.path.join(PROJECT_ROOT, "src", "robot_control")
 if SRC_ROBOT_CONTROL not in sys.path:
     sys.path.insert(0, SRC_ROBOT_CONTROL)
 
-from robot_control.handover.stage1 import load_stage1_robots
+from robot_control.handover.geometry import matrix_to_euler
+from robot_control.handover.stage1 import load_stage1_robots, lookup_manual_handover_with_pre
 from robot_control.handover.stage1_ik import solve_stage1_ik
-from robot_control.handover.stage1_5 import get_robot_link_segments
+from robot_control.handover.stage1_5 import get_robot_link_segments, compute_cartesian_linear_path
 from robot_control.handover.stage2_5 import resolve_stage2_5_target
 from robot_control.handover.stage3_test2 import (
     Stage3Test2Plan,
@@ -38,6 +40,9 @@ from robot_control.handover.stage3_test2 import (
     plan_stage3_test2_paths,
 )
 from robot_control.handover.stage3_test2_solver import (
+    compute_all_test2_handover_poses,
+    compute_single_test2_handover_pose,
+    clear_test2_handover_cache,
     load_test2_handover_cache,
     resolve_test2_handover_cache_path,
 )
@@ -127,7 +132,7 @@ class WebTwinEngine:
     def __init__(self):
         print("[WebTwin] Loading robot kinematics configurations...")
         self.handover_cfg, self.robots, _ = load_stage1_robots()
-        self.fingerprint = compute_config_fingerprint(self.robots)
+        self.fingerprint = compute_config_fingerprint(self.robots, self.handover_cfg)
         print(f"[WebTwin] Config fingerprint: {self.fingerprint}")
 
         # Load Stage 3 Test 2 auto-handover poses
@@ -137,28 +142,15 @@ class WebTwinEngine:
             try:
                 self.auto_poses = load_test2_handover_cache(self.cache_path, self.fingerprint) or {}
                 if not self.auto_poses:
-                    with open(self.cache_path, "r", encoding="utf-8") as f:
-                        d = json.load(f)
-                    fps = list(d.get("fingerprints", {}).keys())
-                    if fps:
-                        self.auto_poses = load_test2_handover_cache(self.cache_path, fps[0]) or {}
-                if self.auto_poses:
-                    print(f"[WebTwin] Loaded {len(self.auto_poses)} auto-handover pair poses from cache.")
+                    print(f"[WebTwin] No cached auto-handover poses found for fingerprint {self.fingerprint}.")
+                else:
+                    print(f"[WebTwin] Loaded {len(self.auto_poses)} auto-handover pair poses from cache for {self.fingerprint}.")
             except Exception as e:
                 print(f"[WebTwin] Note on loading cache: {e}")
 
-        # Target IK cache
+        # Target IK cache (Always bind to current configuration fingerprint)
         self.cache_filepath = resolve_cache_filepath()
         self.target_cache_fp = self.fingerprint
-        if os.path.exists(self.cache_filepath):
-            try:
-                with open(self.cache_filepath, "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                fps = list(d.get("fingerprints", {}).keys())
-                if fps:
-                    self.target_cache_fp = fps[0]
-            except Exception:
-                pass
 
         # Live state
         self.current_q = {
@@ -171,8 +163,9 @@ class WebTwinEngine:
             "robot2": "open",
             "robot3": "open",
         }
-        self.default_pick = [-200.0, 150.0, 150.0]
-        self.default_place = [150.0, 100.0, 180.0]
+        # Default targets identical to Stage 3 Test 2 Tkinter GUI
+        self.default_pick = [100.0, 100.0, 200.0]
+        self.default_place = [0.0, 150.0, 150.0]
         self.reachability_cache = {}
 
     def get_initial_payload(self) -> dict:
@@ -189,6 +182,7 @@ class WebTwinEngine:
                 round(float(x), 2) for x in (cfg.world_base_R @ tcp_base + cfg.world_base_xyz)
             ]
             R_tcp_world = cfg.world_base_R @ R_flange[:3, :3]
+            rpy_world = [round(float(v), 1) for v in np.rad2deg(matrix_to_euler(R_tcp_world))]
 
             # Build DH parameters table for single-robot inspector (testGUI 1, 2, 3)
             dh_table = []
@@ -214,6 +208,7 @@ class WebTwinEngine:
                 "base_rpy_deg": self.handover_cfg["robots"][rid]["world_base_rpy_deg"],
                 "frames_world": pos_world,
                 "tcp_world": tcp_world,
+                "tcp_rpy_deg": rpy_world,
                 "tcp_R": [
                     [round(float(v), 4) for v in row] for row in R_tcp_world
                 ],
@@ -223,23 +218,12 @@ class WebTwinEngine:
                 "dh_table": dh_table,
             }
 
-        # Auto-handover pair summaries
+        # Handover pair solutions (both Auto Kinematics and Manual Override)
+        handover_pairs = self.get_handover_data()
         handover_summaries = {}
-        for pair_key, p in self.auto_poses.items():
-            handover_summaries[pair_key] = {
-                "pair_name": p.pair_name,
-                "handover_position_world": [round(float(v), 2) for v in p.handover_position_world],
-                "standoff_distance_mm": round(float(p.standoff_distance_mm), 1),
-                "robot_a_id": p.robot_a_id,
-                "robot_b_id": p.robot_b_id,
-                "handover_clearance_mm": round(float(p.handover_clearance_mm), 1),
-                "pre_handover_clearance_mm": round(float(p.pre_handover_clearance_mm), 1),
-                "approach_mode": p.approach_mode,
-                "candidate_origin": p.candidate_origin,
-                "dot_z": round(float(p.dot_z), 4),
-                "dot_x": round(float(p.dot_x), 4),
-                "approach_angle_dev_deg": round(float(p.approach_angle_dev_deg), 2),
-            }
+        for p_k, p_dat in handover_pairs.items():
+            if p_dat["auto"]["available"]:
+                handover_summaries[p_k] = p_dat["auto"]
 
         min_d, pt_a, pt_b = compute_laser_endpoints(
             self.current_q["robot1"],
@@ -249,12 +233,14 @@ class WebTwinEngine:
         )
 
         initial_inspection = self.get_kinematics_inspection("robot1")
-        ports = ros_bridge.get_available_ports() if "ros_bridge" in globals() and ros_bridge else ["/dev/robot1", "/dev/robot2", "/dev/robot3"]
-        hw_states = ros_bridge.get_all_robot_states() if "ros_bridge" in globals() and ros_bridge else {}
+        ports = ros_bridge.get_available_ports() if "ros_bridge" in globals() and ros_bridge else []
+        hw_all = ros_bridge.get_all_robot_states() if "ros_bridge" in globals() and ros_bridge else {}
+        hw_states = hw_all.get("robots", hw_all)
 
         return {
             "type": "initial_state",
             "robots": robot_data,
+            "handover_pairs": handover_pairs,
             "handover_poses": handover_summaries,
             "default_pick": self.default_pick,
             "default_place": self.default_place,
@@ -270,19 +256,160 @@ class WebTwinEngine:
             "robot_hardware": hw_states,
         }
 
-    def preview_handover(self, pair: str, which: str = "handover") -> dict:
-        """Preview either the mated handover or pre-handover stance in 3D."""
-        pose_obj = self.auto_poses.get(pair)
-        if not pose_obj:
-            p_parts = pair.split("_")
-            if len(p_parts) == 2:
-                inv_key = f"{p_parts[1]}_{p_parts[0]}"
-                pose_obj = self.auto_poses.get(inv_key)
-                if pose_obj:
-                    pair = inv_key
+    def get_handover_data(self) -> dict:
+        """Get structured auto and manual handover data for all robot pairs."""
+        pairs = ["robot1_robot2", "robot2_robot3", "robot3_robot1"]
+        result = {}
 
+        for pair_key in pairs:
+            parts = pair_key.split("_")
+            rA, rB = parts[0], parts[1]
+            inv_key = f"{rB}_{rA}"
+
+            # 1. Auto Kinematics pose (Top-of-Workspace)
+            p = self.auto_poses.get(pair_key) or self.auto_poses.get(inv_key)
+            if p is not None:
+                auto_info = {
+                    "available": True,
+                    "pair_name": p.pair_name,
+                    "handover_position_world": [round(float(v), 2) for v in p.handover_position_world],
+                    "standoff_distance_mm": round(float(p.standoff_distance_mm), 1),
+                    "robot_a_id": p.robot_a_id,
+                    "robot_b_id": p.robot_b_id,
+                    "handover_clearance_mm": round(float(p.handover_clearance_mm), 1),
+                    "pre_handover_clearance_mm": round(float(p.pre_handover_clearance_mm), 1),
+                    "approach_mode": p.approach_mode,
+                    "candidate_origin": p.candidate_origin,
+                    "dot_z": round(float(p.dot_z), 4),
+                    "dot_x": round(float(p.dot_x), 4),
+                    "approach_angle_dev_deg": round(float(p.approach_angle_dev_deg), 2),
+                }
+            else:
+                auto_info = {
+                    "available": False,
+                    "pair_name": pair_key,
+                    "approach_mode": "NO AUTO SOLUTION",
+                    "error": "Cache empty or invalid configuration fingerprint.",
+                }
+
+            # 2. Manual Override pose (from handover.yaml)
+            res = lookup_manual_handover_with_pre(self.handover_cfg, rA, rB)
+            if res is not None:
+                qA, qB, pre_qA, pre_qB = res
+                tcpa_b, _ = fk(np.deg2rad(qA), self.robots[rA])
+                tcpa_w = self.robots[rA].world_base_R @ tcpa_b + self.robots[rA].world_base_xyz
+                tcpb_b, _ = fk(np.deg2rad(qB), self.robots[rB])
+                tcpb_w = self.robots[rB].world_base_R @ tcpb_b + self.robots[rB].world_base_xyz
+                midpoint = [round(float(x), 1) for x in (tcpa_w + tcpb_w) / 2.0]
+                dist_mm, _, _ = compute_laser_endpoints(
+                    np.array(qA), self.robots[rA],
+                    np.array(qB), self.robots[rB],
+                )
+                manual_info = {
+                    "available": True,
+                    "pair_name": pair_key,
+                    "handover_position_world": midpoint,
+                    "standoff_distance_mm": 50.0,
+                    "handover_clearance_mm": round(float(dist_mm), 1),
+                    "approach_mode": "MANUAL (handover.yaml)",
+                    "robot_a_id": rA,
+                    "robot_b_id": rB,
+                    "robot_a_q": [round(float(v), 1) for v in qA],
+                    "robot_b_q": [round(float(v), 1) for v in qB],
+                    "robot_a_pre_q": [round(float(v), 1) for v in pre_qA],
+                    "robot_b_pre_q": [round(float(v), 1) for v in pre_qB],
+                }
+            else:
+                manual_info = {
+                    "available": False,
+                    "pair_name": pair_key,
+                    "approach_mode": "MANUAL UNAVAILABLE",
+                }
+
+            result[pair_key] = {
+                "auto": auto_info,
+                "manual": manual_info,
+            }
+
+        return result
+
+    def reload_handover_cache(self) -> dict:
+        """Reload auto-handover poses from disk cache."""
+        self.fingerprint = compute_config_fingerprint(self.robots, self.handover_cfg)
+        self.auto_poses = {}
+        if os.path.exists(self.cache_path):
+            try:
+                self.auto_poses = load_test2_handover_cache(self.cache_path, self.fingerprint) or {}
+                print(f"[WebTwin] Reloaded {len(self.auto_poses)} auto-handover poses from cache.")
+            except Exception as e:
+                print(f"[WebTwin] Error reloading cache: {e}")
+        return self.get_handover_data()
+
+    def preview_handover(self, pair: str, which: str = "handover", mode: str = "auto") -> dict:
+        """Preview either the mated handover or pre-handover stance in 3D (Auto or Manual)."""
+        parts = pair.split("_") if "_" in pair else ["robot1", "robot2"]
+        rA, rB = parts[0], parts[1]
+        inv_key = f"{rB}_{rA}"
+
+        if mode == "manual":
+            res = lookup_manual_handover_with_pre(self.handover_cfg, rA, rB)
+            if not res:
+                return {
+                    "cmd": "preview_handover_result",
+                    "success": False,
+                    "error": f"No manual handover postures defined for {pair} in handover.yaml.",
+                    "pair": pair,
+                    "mode": "manual",
+                }
+
+            qA, qB, pre_qA, pre_qB = res
+            sel_qA = pre_qA if which == "pre_handover" else qA
+            sel_qB = pre_qB if which == "pre_handover" else qB
+
+            self.current_q[rA] = [float(v) for v in sel_qA]
+            self.current_q[rB] = [float(v) for v in sel_qB]
+            other = [r for r in ["robot1", "robot2", "robot3"] if r not in (rA, rB)][0]
+            self.current_q[other] = [float(v) for v in self.robots[other].home_deg]
+
+            frame_data = self.compute_frames(self.current_q)
+            dist_mm, pt_a, pt_b = compute_laser_endpoints(
+                np.array(self.current_q[rA]), self.robots[rA],
+                np.array(self.current_q[rB]), self.robots[rB],
+            )
+            tcpa_w = np.array(frame_data[rA]["tcp_world"])
+            tcpb_w = np.array(frame_data[rB]["tcp_world"])
+            midpoint = [round(float(x), 1) for x in (tcpa_w + tcpb_w) / 2.0]
+
+            return {
+                "success": True,
+                "cmd": "preview_handover_result",
+                "pair": pair,
+                "which": which,
+                "mode": "manual",
+                "joint_state": {k: list(v) for k, v in self.current_q.items()},
+                "frames": frame_data,
+                "clearance": {
+                    "min_distance_mm": round(dist_mm, 2),
+                    "endpoint_a": pt_a,
+                    "endpoint_b": pt_b,
+                    "pair": pair,
+                },
+                "standoff_mm": 50.0,
+                "approach_mode": "MANUAL (handover.yaml)",
+                "handover_xyz": midpoint,
+            }
+
+        # Auto Kinematics mode
+        pose_obj = self.auto_poses.get(pair) or self.auto_poses.get(inv_key)
         if not pose_obj:
-            return {"success": False, "error": f"No auto-handover pose found for pair {pair}"}
+            return {
+                "cmd": "preview_handover_result",
+                "success": False,
+                "error": f"No auto-solution available for {pair}. Cache empty or invalid configuration fingerprint. Click 'Recompute (Top-WS)' or select Manual Override.",
+                "pair": pair,
+                "mode": "auto",
+                "no_auto": True,
+            }
 
         rA = pose_obj.robot_a_id
         rB = pose_obj.robot_b_id
@@ -310,6 +437,7 @@ class WebTwinEngine:
             "cmd": "preview_handover_result",
             "pair": pair,
             "which": which,
+            "mode": "auto",
             "joint_state": {k: list(v) for k, v in self.current_q.items()},
             "frames": frame_data,
             "clearance": {
@@ -384,10 +512,12 @@ class WebTwinEngine:
                 round(float(x), 2) for x in (cfg.world_base_R @ tcp_base + cfg.world_base_xyz)
             ]
             R_tcp_world = cfg.world_base_R @ R_flange[:3, :3]
+            rpy_world = [round(float(v), 1) for v in np.rad2deg(matrix_to_euler(R_tcp_world))]
 
             res[rid] = {
                 "frames_world": pos_world,
                 "tcp_world": tcp_world,
+                "tcp_rpy_deg": rpy_world,
                 "tcp_R": [
                     [round(float(v), 4) for v in row] for row in R_tcp_world
                 ],
@@ -428,6 +558,7 @@ class WebTwinEngine:
 
         t_matrix = [[round(float(val), 3) for val in row] for row in T_world]
         t_base_matrix = [[round(float(val), 3) for val in row] for row in T_flange]
+        rpy_world = [round(float(v), 1) for v in np.rad2deg(matrix_to_euler(T_world[:3, :3]))]
 
         geometry = {
             "base_height_mm": round(float(cfg.d[0]), 2) if len(cfg.d) > 0 else 0.0,
@@ -445,6 +576,7 @@ class WebTwinEngine:
             "robot_id": robot_id,
             "q_deg": [round(float(v), 2) for v in q_deg],
             "tcp_world": [round(float(v), 2) for v in p_world],
+            "tcp_rpy_deg": rpy_world,
             "tcp_base": [round(float(v), 2) for v in p_tcp],
             "transformation_matrix": t_matrix,
             "transformation_matrix_base": t_base_matrix,
@@ -591,6 +723,16 @@ class WebTwinEngine:
         pick_deg = [round(float(v), 2) for v in pick_res.q_deg]
         place_deg = [round(float(v), 2) for v in place_res.q_deg]
 
+        # Pre-pick and Pre-place Cartesian heights (Z + 50 mm)
+        pre_pick_xyz = [pick_xyz[0], pick_xyz[1], pick_xyz[2] + 50.0]
+        pre_place_xyz = [place_xyz[0], place_xyz[1], place_xyz[2] + 50.0]
+
+        pre_pick_res = solve_stage1_ik(robot_id, pre_pick_xyz, cfg, current_q, num_random_starts=8)
+        pre_pick_deg = [round(float(v), 2) for v in pre_pick_res.q_deg] if pre_pick_res else pick_deg
+
+        pre_place_res = solve_stage1_ik(robot_id, pre_place_xyz, cfg, pick_res.q_deg, num_random_starts=8)
+        pre_place_deg = [round(float(v), 2) for v in pre_place_res.q_deg] if pre_place_res else place_deg
+
         steps = []
         def add_interp(q_start, q_end, num_steps, phase_name, grip_state):
             for s in range(num_steps):
@@ -606,30 +748,102 @@ class WebTwinEngine:
                     "gripper_state": {robot_id: grip_state},
                 })
 
-        add_interp(self.current_q[robot_id], pick_deg, 12, "1. Move to Pick Target", "open")
-        for _ in range(3):
+        # Phase 0 & 1a: Proactive open gripper + Free-space transit to Pre-Pick (Z + 50mm)
+        add_interp(self.current_q[robot_id], pre_pick_deg, 12, "Phase 1a: Move to Pre-Pick (+50mm)", "open")
+
+        # Phase 1b: Linear Vertical Descent to Pick (Cartesian straight line -Z)
+        cart_descent = compute_cartesian_linear_path(pre_pick_deg, pick_xyz, cfg, num_steps=8, frame="world")
+        if cart_descent is not None:
+            for q_step in cart_descent:
+                full_q = {r: list(self.current_q[r]) for r in ["robot1", "robot2", "robot3"]}
+                full_q[robot_id] = [round(float(v), 2) for v in q_step]
+                steps.append({
+                    "step_idx": len(steps),
+                    "phase": "Phase 1b: Cartesian Descent to Pick (-Z)",
+                    "joint_state": full_q,
+                    "frames": self.compute_frames(full_q),
+                    "gripper_state": {robot_id: "open"},
+                })
+        else:
+            add_interp(pre_pick_deg, pick_deg, 8, "Phase 1b: Cartesian Descent to Pick", "open")
+
+        # Phase 2: Grasp Object with settling dwell
+        for _ in range(4):
             full_q = {r: list(self.current_q[r]) for r in ["robot1", "robot2", "robot3"]}
             full_q[robot_id] = pick_deg
             steps.append({
                 "step_idx": len(steps),
-                "phase": "2. Grasp Object (Gripper Closed)",
+                "phase": "Phase 2: Grasp & Dwell (Gripper Closed)",
                 "joint_state": full_q,
                 "frames": self.compute_frames(full_q),
                 "gripper_state": {robot_id: "close"},
             })
-        add_interp(pick_deg, home_deg, 8, "3. Retract with Object", "close")
-        add_interp(home_deg, place_deg, 12, "4. Move to Place Target", "close")
-        for _ in range(3):
+
+        # Phase 3: Linear Vertical Lift to Pre-Pick (Cartesian straight line +50mm)
+        cart_lift = compute_cartesian_linear_path(pick_deg, pre_pick_xyz, cfg, num_steps=8, frame="world")
+        if cart_lift is not None:
+            for q_step in cart_lift:
+                full_q = {r: list(self.current_q[r]) for r in ["robot1", "robot2", "robot3"]}
+                full_q[robot_id] = [round(float(v), 2) for v in q_step]
+                steps.append({
+                    "step_idx": len(steps),
+                    "phase": "Phase 3: Cartesian Lift (+50mm)",
+                    "joint_state": full_q,
+                    "frames": self.compute_frames(full_q),
+                    "gripper_state": {robot_id: "close"},
+                })
+        else:
+            add_interp(pick_deg, pre_pick_deg, 8, "Phase 3: Cartesian Lift (+50mm)", "close")
+
+        # Phase 4a: Free-space transit to Pre-Place (+50mm)
+        add_interp(pre_pick_deg, pre_place_deg, 12, "Phase 4a: Transit to Pre-Place (+50mm)", "close")
+
+        # Phase 4b: Linear Vertical Descent to Place (Cartesian straight line -Z)
+        cart_descent_pl = compute_cartesian_linear_path(pre_place_deg, place_xyz, cfg, num_steps=8, frame="world")
+        if cart_descent_pl is not None:
+            for q_step in cart_descent_pl:
+                full_q = {r: list(self.current_q[r]) for r in ["robot1", "robot2", "robot3"]}
+                full_q[robot_id] = [round(float(v), 2) for v in q_step]
+                steps.append({
+                    "step_idx": len(steps),
+                    "phase": "Phase 4b: Cartesian Descent to Place (-Z)",
+                    "joint_state": full_q,
+                    "frames": self.compute_frames(full_q),
+                    "gripper_state": {robot_id: "close"},
+                })
+        else:
+            add_interp(pre_place_deg, place_deg, 8, "Phase 4b: Cartesian Descent to Place", "close")
+
+        # Phase 5: Release Object with settling dwell
+        for _ in range(4):
             full_q = {r: list(self.current_q[r]) for r in ["robot1", "robot2", "robot3"]}
             full_q[robot_id] = place_deg
             steps.append({
                 "step_idx": len(steps),
-                "phase": "5. Release Object (Gripper Open)",
+                "phase": "Phase 5: Release & Dwell (Gripper Open)",
                 "joint_state": full_q,
                 "frames": self.compute_frames(full_q),
                 "gripper_state": {robot_id: "open"},
             })
-        add_interp(place_deg, home_deg, 10, "6. Return to Mechanical Home", "open")
+
+        # Phase 6: Linear Vertical Retraction to Pre-Place (Cartesian straight line +50mm)
+        cart_retract_pl = compute_cartesian_linear_path(place_deg, pre_place_xyz, cfg, num_steps=8, frame="world")
+        if cart_retract_pl is not None:
+            for q_step in cart_retract_pl:
+                full_q = {r: list(self.current_q[r]) for r in ["robot1", "robot2", "robot3"]}
+                full_q[robot_id] = [round(float(v), 2) for v in q_step]
+                steps.append({
+                    "step_idx": len(steps),
+                    "phase": "Phase 6: Cartesian Retraction (+50mm)",
+                    "joint_state": full_q,
+                    "frames": self.compute_frames(full_q),
+                    "gripper_state": {robot_id: "open"},
+                })
+        else:
+            add_interp(place_deg, pre_place_deg, 8, "Phase 6: Cartesian Retraction (+50mm)", "open")
+
+        # Phase 7: Return to Mechanical Home
+        add_interp(pre_place_deg, home_deg, 10, "Phase 7: Return to Mechanical Home", "open")
 
         return {
             "success": True,
@@ -702,9 +916,10 @@ class WebTwinEngine:
         place_yaw: float,
         chosen_pick_robot: Optional[str] = None,
         chosen_place_robot: Optional[str] = None,
+        handover_mode: str = "auto",
     ) -> dict:
         """Generate Stage 3 Test 2 plan and discretized 9-phase trajectory."""
-        print(f"[WebTwin] Planning trajectory: Pick {pick_xyz} (yaw {pick_yaw}°), Place {place_xyz} (yaw {place_yaw}°)")
+        print(f"[WebTwin] Planning trajectory: Pick {pick_xyz} (yaw {pick_yaw}°), Place {place_xyz} (yaw {place_yaw}°), Mode: {handover_mode}")
 
         # Step 1: Check options to see if interactive choice is required
         cached_pick = lookup_cached_target_ik(self.cache_filepath, self.target_cache_fp, pick_xyz, pick_yaw)
@@ -768,8 +983,14 @@ class WebTwinEngine:
                 return chosen_pick_robot
             if label == "place" and chosen_place_robot and chosen_place_robot in choices:
                 return chosen_place_robot
+            if label == "pick" and len(choices) > 1:
+                # Prefer handover pair if place candidates are distinct
+                other_choices = [c for c in choices if c not in place_candidates]
+                if other_choices:
+                    return other_choices[0]
             return choices[0]
 
+        use_auto = (handover_mode == "auto")
         try:
             plan, _, _ = build_stage3_test2_plan(
                 pick_xyz=pick_xyz,
@@ -779,10 +1000,10 @@ class WebTwinEngine:
                 chooser=chooser,
                 pick_yaw_deg=pick_yaw,
                 place_yaw_deg=place_yaw,
-                use_auto_handover=True,
+                use_auto_handover=use_auto,
                 cache_filepath=self.cache_filepath,
                 config_fingerprint=self.target_cache_fp,
-                test_poses=self.auto_poses,
+                test_poses=self.auto_poses if use_auto else None,
             )
 
             steps_per_phase = 16
@@ -800,15 +1021,15 @@ class WebTwinEngine:
         # Discretize and package all trajectory steps for smooth 60 FPS animation
         steps_payload = []
         phase_definitions = [
-            (1, "Phase 1: Simultaneous Pick & Pre-Handover Stationing", traj_result.phase1_simultaneous),
-            (2, "Phase 2: Pick Gripper Grasp (Dwell)", None),  # Dwell 2.0s
-            (3, "Phase 3: Pick Robot -> Pre-Handover Stance", traj_result.phase3_pick_to_pre_handover),
-            (4, "Phase 4: Synchronized Advance along Cartesian Corridors", traj_result.phase4_advance_to_handover),
+            (1, "Phase 1: Approach Pre-Pick (+50mm) & Cartesian Descent (-Z)", traj_result.phase1_simultaneous),
+            (2, "Phase 2: Settle & Gripper Grasp (Dwell)", None),  # Dwell 2.0s
+            (3, "Phase 3: Cartesian Lift (+50mm) & Transit to Pre-Handover", traj_result.phase3_pick_to_pre_handover),
+            (4, "Phase 4: Synchronized Advance along Handover Corridors", traj_result.phase4_advance_to_handover),
             (5, "Phase 5: Gripper Handover Transfer (Dwell)", None),  # Dwell 1.0s
-            (6, "Phase 6: Synchronized Retraction along Cartesian Corridors", traj_result.phase6_retract_to_pre_handover),
-            (7, "Phase 7: Place Robot -> Place Target", traj_result.phase7_handover_to_place),
-            (8, "Phase 8: Place Gripper Release (Dwell)", None),  # Dwell 2.0s
-            (9, "Phase 9: Simultaneous Return to Home", traj_result.phase9_simultaneous_home),
+            (6, "Phase 6: Synchronized Retraction along Reverse Corridors", traj_result.phase6_retract_to_pre_handover),
+            (7, "Phase 7: Transfer to Pre-Place (+50mm) & Cartesian Descent (-Z)", traj_result.phase7_handover_to_place),
+            (8, "Phase 8: Settle & Gripper Release (Dwell)", None),  # Dwell 2.0s
+            (9, "Phase 9: Cartesian Retract (+50mm) & Simultaneous Return Home", traj_result.phase9_simultaneous_home),
         ]
 
         pick_r = plan.pick_robot
@@ -839,27 +1060,43 @@ class WebTwinEngine:
                     frame_data = self.compute_frames(current_joint_state)
 
                     # Determine gripper states & workpiece attachment
-                    g_pick = "close" if phase_num >= 2 and phase_num < 5 else "open"
-                    g_place = "close" if phase_num >= 5 and phase_num < 8 else "open"
-
-                    if phase_num in (2, 3, 4):
-                        workpiece_state = {
-                            "attached_to": pick_r,
-                            "position": frame_data[pick_r]["tcp_world"],
-                            "rotation": [0.0, 0.0, float(pick_yaw)],
-                        }
-                    elif phase_num in (5, 6, 7):
-                        workpiece_state = {
-                            "attached_to": place_r,
-                            "position": frame_data[place_r]["tcp_world"],
-                            "rotation": [0.0, 0.0, float(place_yaw)],
-                        }
-                    elif phase_num >= 8:
-                        workpiece_state = {
-                            "attached_to": None,
-                            "position": [float(place_xyz[0]), float(place_xyz[1]), 20.0],
-                            "rotation": [0.0, 0.0, float(place_yaw)],
-                        }
+                    if pick_r == place_r:
+                        g_act = "close" if phase_num in (2, 3, 4, 5, 6, 7) else "open"
+                        g_pick = g_act
+                        g_place = g_act
+                        if 2 <= phase_num < 8:
+                            workpiece_state = {
+                                "attached_to": pick_r,
+                                "position": frame_data[pick_r]["tcp_world"],
+                                "rotation": [0.0, 0.0, float(pick_yaw)],
+                            }
+                        elif phase_num >= 8:
+                            workpiece_state = {
+                                "attached_to": None,
+                                "position": [float(place_xyz[0]), float(place_xyz[1]), 20.0],
+                                "rotation": [0.0, 0.0, float(place_yaw)],
+                            }
+                    else:
+                        g_pick = "close" if 2 <= phase_num < 5 else "open"
+                        g_place = "close" if 5 <= phase_num < 8 else "open"
+                        if phase_num in (2, 3, 4):
+                            workpiece_state = {
+                                "attached_to": pick_r,
+                                "position": frame_data[pick_r]["tcp_world"],
+                                "rotation": [0.0, 0.0, float(pick_yaw)],
+                            }
+                        elif phase_num in (5, 6, 7):
+                            workpiece_state = {
+                                "attached_to": place_r,
+                                "position": frame_data[place_r]["tcp_world"],
+                                "rotation": [0.0, 0.0, float(place_yaw)],
+                            }
+                        elif phase_num >= 8:
+                            workpiece_state = {
+                                "attached_to": None,
+                                "position": [float(place_xyz[0]), float(place_xyz[1]), 20.0],
+                                "rotation": [0.0, 0.0, float(place_yaw)],
+                            }
 
                     # Clearance & laser endpoints between active robots
                     dist_mm, pt_a, pt_b = compute_laser_endpoints(
@@ -891,8 +1128,13 @@ class WebTwinEngine:
                     })
             else:
                 # Dwell step (Phases 2, 5, 8)
-                g_pick = "close" if phase_num in (2, 5) else "open"
-                g_place = "close" if phase_num in (5, 8) else "open"
+                if pick_r == place_r:
+                    g_act = "close" if phase_num in (2, 5) else "open"
+                    g_pick = g_act
+                    g_place = g_act
+                else:
+                    g_pick = "close" if phase_num in (2, 5) else "open"
+                    g_place = "close" if phase_num in (5, 8) else "open"
                 frame_data = self.compute_frames(current_joint_state)
                 dist_mm, pt_a, pt_b = compute_laser_endpoints(
                     np.array(current_joint_state[pick_r]),
@@ -921,6 +1163,22 @@ class WebTwinEngine:
                     },
                 })
 
+        min_overall_clr = (
+            round(float(traj_result.min_overall_clearance_mm), 1)
+            if not math.isinf(traj_result.min_overall_clearance_mm)
+            else 999.0
+        )
+        clr_display_str = (
+            f"{min_overall_clr} mm"
+            if not math.isinf(traj_result.min_overall_clearance_mm)
+            else "N/A (Single Robot)"
+        )
+
+        ho_mode_str = (
+            "AUTO KINEMATICS (Top-of-WS)" if (plan.needs_handover and plan.use_auto_handover and plan.auto_handover_info)
+            else ("DIRECT (Same Robot - No Handover)" if not plan.needs_handover else "MANUAL OVERRIDE (handover.yaml)")
+        )
+
         return {
             "success": True,
             "needs_choice": False,
@@ -933,7 +1191,9 @@ class WebTwinEngine:
                 "place_tilt": round(float(plan.place.approach_tilt_deg or 0.0), 1),
                 "needs_handover": plan.needs_handover,
                 "handover_pair": f"{pick_r}_{place_r}",
-                "min_overall_clearance_mm": round(float(traj_result.min_overall_clearance_mm), 1),
+                "handover_mode": "auto" if plan.use_auto_handover else "manual",
+                "handover_desc": ho_mode_str,
+                "min_overall_clearance_mm": min_overall_clr,
                 "all_phases_safe": traj_result.all_phases_safe,
                 "total_steps": len(steps_payload),
                 "approach_mode": getattr(plan, "approach_mode", "DUAL_SYNCHRONIZED"),
@@ -945,12 +1205,23 @@ class WebTwinEngine:
                 if plan.auto_handover_info else None,
             },
             "planning_logs": [
-                "=== STAGE 3 TEST 2 TASK PLAN CREATED ===",
-                f"Pick Target: [{pick_xyz[0]}, {pick_xyz[1]}, {pick_xyz[2]}] mm (yaw: {pick_yaw}°) -> {pick_r.upper()} ({plan.pick.solver_type}, tilt: {round(float(plan.pick.approach_tilt_deg or 0.0), 1)}°)",
-                f"Place Target: [{place_xyz[0]}, {place_xyz[1]}, {place_xyz[2]}] mm (yaw: {place_yaw}°) -> {place_r.upper()} ({plan.place.solver_type}, tilt: {round(float(plan.place.approach_tilt_deg or 0.0), 1)}°)",
-                (f"Handover Strategy: AUTO {pick_r.upper()} ➔ {place_r.upper()} at {[round(float(x), 1) for x in plan.auto_handover_info.handover_position_world]} mm (Top-of-WS)" if plan.needs_handover and plan.auto_handover_info else ("Handover Strategy: DIRECT (Same Robot - No Handover)" if not plan.needs_handover else "Handover Strategy: MANUAL OVERRIDE")),
-                f"Min Body Clearance: {round(float(traj_result.min_overall_clearance_mm), 1)} mm (Gate: {safe_dist:.1f} mm) -> {'✓ SAFE' if traj_result.all_phases_safe else '⚠️ WARNING: NEAR LIMIT'}",
-                f"Trajectory: 9 phases discretized into {len(steps_payload)} synchronized steps ready for simulation.",
+                "=== STARTING STAGE 3 TEST 2 TASK EXECUTION ===",
+                "[MODE: 3D SIMULATION PREVIEW] Strategy: TOP_OF_WORKSPACE",
+                f"PICK: {pick_r.upper()} (Solver: {plan.pick.solver_type})",
+                f"PLACE: {place_r.upper()} (Solver: {plan.place.solver_type})",
+                f"HANDOVER: {ho_mode_str}",
+                "Planning collision-free synchronized trajectories...",
+                f"Min predicted body clearance: {clr_display_str} (Safe dist: {safe_dist:.1f} mm)",
+                f">>> 1. SIMULTANEOUS: {pick_r} approaches Pre-Pick (+50mm) & Cartesian descends (-Z) to Pick. WHILE {place_r if plan.needs_handover else 'other'} moves to Pre-Handover!",
+                f">>> 2. {pick_r} dwells 2.0s, closes gripper (grasp), and dwells 2.0s. ({place_r if plan.needs_handover else 'other'} waiting at Pre-Handover)",
+                f">>> 3. {pick_r} Cartesian lifts (+50mm) to Pre-Pick and transfers to Pre-Handover.",
+                f">>> 4. ADVANCE: Both robots enter Handover mating corridor." if plan.needs_handover else ">>> 4. Transit directly to Pre-Place.",
+                f">>> 5. HANDOVER TRANSFER: {place_r} closes gripper, {pick_r} opens gripper." if plan.needs_handover else ">>> 5. Continuous transfer.",
+                f">>> 6. RETRACT: Both robots retreat safely back to Pre-Handover along reverse corridors." if plan.needs_handover else ">>> 6. Settle.",
+                f">>> 7. {place_r} transfers to Pre-Place (+50mm) & Cartesian descends (-Z) to Place Target.",
+                f">>> 8. {place_r} dwells 2.0s, opens gripper at Place Target, and dwells 2.0s.",
+                f">>> 9. {place_r} Cartesian retracts (+50mm) to Pre-Place & SIMULTANEOUS RETURN: Both robots return to Home!",
+                "✓ Task completed successfully!",
             ],
             "steps": steps_payload,
         }
@@ -971,10 +1242,23 @@ async def telemetry_broadcaster(app: web.Application):
             await asyncio.sleep(0.1)
             if ACTIVE_WEBSOCKETS and ros_bridge:
                 hw_state = ros_bridge.get_all_robot_states()
+                frame_data = twin_engine.compute_frames(twin_engine.current_q)
+                min_d, pt_a, pt_b = compute_laser_endpoints(
+                    np.array(twin_engine.current_q["robot1"]),
+                    twin_engine.robots["robot1"],
+                    np.array(twin_engine.current_q["robot2"]),
+                    twin_engine.robots["robot2"],
+                )
                 payload = json.dumps({
                     "cmd": "telemetry_broadcast",
                     "hardware": hw_state,
                     "joint_state": twin_engine.current_q,
+                    "frames": frame_data,
+                    "clearance": {
+                        "min_distance_mm": round(min_d, 2),
+                        "endpoint_a": pt_a,
+                        "endpoint_b": pt_b,
+                    },
                     "grippers": twin_engine.gripper_state,
                 })
                 dead = set()
@@ -1027,6 +1311,11 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
                         res = ros_bridge.set_robot_port(robot_id, port)
                         await ws.send_str(json.dumps({"cmd": "set_port_result", **res}))
 
+                    elif cmd == "disconnect_robot_port":
+                        robot_id = data.get("robot_id", "robot1")
+                        res = ros_bridge.disconnect_robot_port(robot_id)
+                        await ws.send_str(json.dumps({"cmd": "disconnect_port_result", **res}))
+
                     elif cmd == "emergency_stop":
                         target = data.get("robot_id", "all")
                         res = ros_bridge.emergency_stop(target)
@@ -1048,7 +1337,7 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
                             **res,
                         }))
 
-                    elif cmd == "set_robot_speed":
+                    elif cmd in ("set_robot_speed", "set_speed"):
                         robot_id = data.get("robot_id", "robot1")
                         speed = int(data.get("speed", 5))
                         res = ros_bridge.set_speed(robot_id, speed)
@@ -1146,6 +1435,7 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
                         place_yaw = float(data.get("place_yaw", 0.0))
                         chosen_pick = data.get("chosen_pick_robot")
                         chosen_place = data.get("chosen_place_robot")
+                        handover_mode = data.get("handover_mode", "auto")
 
                         plan_res = await loop.run_in_executor(
                             None,
@@ -1156,6 +1446,7 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
                                 place_yaw=place_yaw,
                                 chosen_pick_robot=chosen_pick,
                                 chosen_place_robot=chosen_place,
+                                handover_mode=handover_mode,
                             ),
                         )
                         plan_res["cmd"] = "trajectory_planned"
@@ -1165,7 +1456,73 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
                     elif cmd == "preview_handover":
                         pair = data.get("pair", "robot1_robot2")
                         which = data.get("which", "handover")
-                        res = twin_engine.preview_handover(pair, which)
+                        mode = data.get("mode", "auto")
+                        res = twin_engine.preview_handover(pair, which, mode)
+                        if not ws.closed:
+                            await ws.send_str(json.dumps(res))
+
+                    elif cmd == "reload_handover_cache":
+                        ho_data = twin_engine.reload_handover_cache()
+                        res = {
+                            "cmd": "handover_cache_reloaded",
+                            "success": True,
+                            "handover_pairs": ho_data,
+                            "count": len(twin_engine.auto_poses),
+                        }
+                        if not ws.closed:
+                            await ws.send_str(json.dumps(res))
+
+                    elif cmd == "clear_handover_cache":
+                        print("[WebTwin] Clearing test2 handover cache for active configuration...")
+                        clear_test2_handover_cache(twin_engine.cache_path, twin_engine.fingerprint)
+                        twin_engine.auto_poses = {}
+                        res = {
+                            "cmd": "handover_cache_cleared",
+                            "success": True,
+                            "handover_pairs": twin_engine.get_handover_data(),
+                        }
+                        if not ws.closed:
+                            await ws.send_str(json.dumps(res))
+
+                    elif cmd == "recompute_handover":
+                        pair = data.get("pair")
+                        if pair:
+                            print(f"[WebTwin] Recomputing Stage 3 Test 2 handover pose for pair {pair} (Top-of-Workspace)...")
+                            pose = await loop.run_in_executor(
+                                None,
+                                lambda: compute_single_test2_handover_pose(
+                                    pair,
+                                    twin_engine.robots,
+                                    twin_engine.handover_cfg,
+                                    cache_path=twin_engine.cache_path,
+                                ),
+                            )
+                            all_poses = load_test2_handover_cache(twin_engine.cache_path, twin_engine.fingerprint) or {}
+                            if pose is not None:
+                                all_poses[pair] = pose
+                            twin_engine.auto_poses = all_poses
+                            print(f"[WebTwin] Recomputation of {pair} complete. Pose found: {pose is not None}.")
+                        else:
+                            print("[WebTwin] Recomputing Stage 3 Test 2 handover poses for all pairs (Top-of-Workspace)...")
+                            poses = await loop.run_in_executor(
+                                None,
+                                lambda: compute_all_test2_handover_poses(
+                                    twin_engine.robots,
+                                    twin_engine.handover_cfg,
+                                    cache_path=twin_engine.cache_path,
+                                    force_recompute=True,
+                                ),
+                            )
+                            all_poses = load_test2_handover_cache(twin_engine.cache_path, twin_engine.fingerprint) or poses or {}
+                            twin_engine.auto_poses = all_poses
+                            print(f"[WebTwin] Recomputation complete. {len(twin_engine.auto_poses)} pairs in cache.")
+
+                        res = {
+                            "cmd": "handover_recomputed",
+                            "success": True,
+                            "count": len(twin_engine.auto_poses),
+                            "handover_pairs": twin_engine.get_handover_data(),
+                        }
                         if not ws.closed:
                             await ws.send_str(json.dumps(res))
 

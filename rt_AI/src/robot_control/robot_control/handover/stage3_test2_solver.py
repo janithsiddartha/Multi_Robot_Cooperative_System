@@ -160,7 +160,7 @@ def load_test2_handover_cache(cache_path: str, config_hash: str) -> Optional[Dic
 
 
 def save_test2_handover_cache(cache_path: str, config_hash: str, poses: Dict[str, AutoHandoverTest2Pose]) -> bool:
-    """Save test2 handover poses atomically to JSON cache."""
+    """Save test2 handover poses atomically to JSON cache, merging with existing solved pairs for this config."""
     try:
         os.makedirs(os.path.dirname(os.path.abspath(cache_path)), exist_ok=True)
         data = {"version": "2.0-test2", "fingerprints": {}}
@@ -175,12 +175,45 @@ def save_test2_handover_cache(cache_path: str, config_hash: str, poses: Dict[str
                 pass
 
         if config_hash not in data["fingerprints"]:
-            data["fingerprints"][config_hash] = {}
+            data["fingerprints"][config_hash] = {
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "pairs": {}
+            }
 
-        data["fingerprints"][config_hash] = {
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "pairs": {pname: serialize_test2_auto_handover(pose) for pname, pose in poses.items()}
-        }
+        existing_pairs = data["fingerprints"][config_hash].get("pairs", {})
+        for pname, pose in poses.items():
+            existing_pairs[pname] = serialize_test2_auto_handover(pose)
+
+        data["fingerprints"][config_hash]["pairs"] = existing_pairs
+        data["fingerprints"][config_hash]["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+
+        tmp_file = cache_path + ".tmp"
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_file, cache_path)
+        return True
+    except Exception:
+        return False
+
+
+def clear_test2_handover_cache(cache_path: str, config_hash: Optional[str] = None) -> bool:
+    """Clear test2 handover poses from cache file (for a specific fingerprint or completely)."""
+    try:
+        if not os.path.exists(cache_path):
+            return True
+        data = {"version": "2.0-test2", "fingerprints": {}}
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict) and "fingerprints" in loaded:
+                    data = loaded
+        except Exception:
+            pass
+
+        if config_hash is None:
+            data["fingerprints"] = {}
+        elif config_hash in data.get("fingerprints", {}):
+            del data["fingerprints"][config_hash]
 
         tmp_file = cache_path + ".tmp"
         with open(tmp_file, "w", encoding="utf-8") as f:
@@ -464,7 +497,67 @@ def compute_all_test2_handover_poses(
         if pose is not None:
             solved_pairs[f"{rA_str}_{rB_str}"] = pose
 
-    if len(solved_pairs) >= 3:
+    if len(solved_pairs) > 0:
         save_test2_handover_cache(cache_path, config_hash, solved_pairs)
 
     return solved_pairs
+
+
+def compute_single_test2_handover_pose(
+    pair_name: str,
+    robots: Dict[str, Any],
+    handover_cfg: Optional[dict] = None,
+    cache_path: Optional[str] = None,
+    progress_callback: Optional[Any] = None,
+) -> Optional[AutoHandoverTest2Pose]:
+    """Compute and cache Stage 3 Test 2 handover pose for a single pair (e.g. 'robot1_robot2', 'robot2_robot3', 'robot3_robot1')."""
+    cache_path = cache_path or resolve_test2_handover_cache_path()
+    config_hash = compute_config_fingerprint(robots, handover_cfg)
+
+    parts = pair_name.split('_')
+    if len(parts) != 2:
+        if progress_callback:
+            progress_callback(f"Invalid pair format '{pair_name}', expected 'robotA_robotB'.")
+        return None
+    rA_str, rB_str = parts[0], parts[1]
+
+    id_map = {'robot1': 1, 'robot2': 2, 'robot3': 3}
+    idA = id_map.get(rA_str)
+    idB = id_map.get(rB_str)
+    if idA is None or idB is None:
+        if progress_callback:
+            progress_callback(f"Unknown robots in pair '{pair_name}'.")
+        return None
+
+    if progress_callback:
+        progress_callback(f"Computing workspace intersection for {pair_name} (Top-of-Workspace only)...")
+
+    int_robots = {1: robots['robot1'], 2: robots['robot2'], 3: robots['robot3']}
+    ws_config = {
+        'workspace': {'sampling': {'voxel_size_mm': 25.0, 'workspace_samples': 20000}},
+        'robots': handover_cfg.get('robots', {}) if handover_cfg else {}
+    }
+    ws = PositionWorkspaceComputer(ws_config, int_robots)
+    ws.compute()
+
+    pts = ws.get_common_voxel_centers(idA, idB)
+    if len(pts) == 0:
+        pts = ws.get_common_voxel_centers(idB, idA)
+
+    if len(pts) == 0:
+        if progress_callback:
+            progress_callback(f"[{pair_name}] No common workspace voxels found between {rA_str} and {rB_str}.")
+        return None
+
+    pose = solve_pair_test2_handover(
+        rA_str,
+        rB_str,
+        robots,
+        pts,
+        handover_cfg=handover_cfg,
+        progress_callback=progress_callback,
+    )
+    if pose is not None:
+        save_test2_handover_cache(cache_path, config_hash, {pair_name: pose})
+
+    return pose
