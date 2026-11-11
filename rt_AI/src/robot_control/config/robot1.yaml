@@ -30,7 +30,7 @@
       baudrate: 115200
 
     gripper:
-      open_angle: -55.0
+      open_angle: -90.0
       close_angle: 55.0
       scale: 1.0
       sign: 1.0

@@ -181,9 +181,13 @@ class Stage3Test2GUI(Stage3GUI):
 
         # Speed publishers for all robots
         self.publishers_speed = {}
+        self.publishers_gripper_speed = {}
         for rid in self.robots.keys():
             self.publishers_speed[rid] = self.create_publisher(
                 Int32, f'/{rid}/robot_speed', 10
+            )
+            self.publishers_gripper_speed[rid] = self.create_publisher(
+                Int32, f'/{rid}/gripper_speed', 10
             )
 
         # Hardware serial command publishers & subscriptions
@@ -724,6 +728,19 @@ class Stage3Test2GUI(Stage3GUI):
         )
         self.speed_slider.set(self.speed)
         self.speed_slider.pack(fill="x", pady=(1, 2))
+
+        self.gripper_speed = 5
+        self.gripper_speed_lbl = tk.Label(
+            speed_frame, text=f"GRIPPER SPEED: LEVEL {self.gripper_speed} / 10",
+            font=("Helvetica", 8, "bold"), bg=self.bg_color, fg="#10B981"
+        )
+        self.gripper_speed_lbl.pack(side="top", anchor="w", pady=(3, 0))
+        self.gripper_speed_slider = ttk.Scale(
+            speed_frame, from_=1, to=10, orient="horizontal",
+            command=self._on_gripper_speed_slider_change
+        )
+        self.gripper_speed_slider.set(self.gripper_speed)
+        self.gripper_speed_slider.pack(fill="x", pady=(1, 2))
 
         self.plan_status_lbl = tk.Label(
             action_frame, text="Plan Status: Ready to plan",
@@ -1367,6 +1384,17 @@ class Stage3Test2GUI(Stage3GUI):
             msg = Int32()
             msg.data = self.speed
             for rid, pub in getattr(self, 'publishers_speed', {}).items():
+                pub.publish(msg)
+
+    def _on_gripper_speed_slider_change(self, val):
+        s = int(float(val))
+        if s != getattr(self, 'gripper_speed', 5):
+            self.gripper_speed = s
+            if hasattr(self, 'gripper_speed_lbl'):
+                self.gripper_speed_lbl.config(text=f"GRIPPER SPEED: LEVEL {self.gripper_speed} / 10")
+            msg = Int32()
+            msg.data = self.gripper_speed
+            for rid, pub in getattr(self, 'publishers_gripper_speed', {}).items():
                 pub.publish(msg)
 
     def _on_robot_speed_cb(self, msg, rid: str):

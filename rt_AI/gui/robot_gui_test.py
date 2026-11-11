@@ -419,13 +419,14 @@ class RobotGUI(Node):
         # ----------------------------------------------------
 
         self.speed_pub = self.create_publisher(
-
             Int32,
-
             'robot_speed',
-
             10
-
+        )
+        self.gripper_speed_pub = self.create_publisher(
+            Int32,
+            'gripper_speed',
+            10
         )
 
 
@@ -1267,6 +1268,22 @@ class RobotGUI(Node):
         self.speed_slider = RoundedSlider(frame, from_=1, to=10, command=self.speed_changed)
         self.speed_slider.set(self.speed)
         self.speed_slider.pack(fill='x')
+
+        self.gripper_speed = 5
+        self.gripper_speed_label = tk.Label(frame, text=f'GRIPPER SPEED {self.gripper_speed} / 10', bg=self.card_color, fg="#10B981", font=self.font_bold)
+        self.gripper_speed_label.pack(pady=(6, 4))
+        self.gripper_speed_slider = RoundedSlider(frame, from_=1, to=10, command=self.gripper_speed_changed)
+        self.gripper_speed_slider.set(self.gripper_speed)
+        self.gripper_speed_slider.pack(fill='x')
+
+    def gripper_speed_changed(self, value):
+        self.gripper_speed = int(float(value))
+        if hasattr(self, 'gripper_speed_label'):
+            self.gripper_speed_label.config(text=f'GRIPPER SPEED  {self.gripper_speed}/10')
+        msg = Int32()
+        msg.data = self.gripper_speed
+        if hasattr(self, 'gripper_speed_pub'):
+            self.gripper_speed_pub.publish(msg)
 
     def create_pick_place_panel(self, parent):
         frame = self.create_section_frame(parent, 'PICK & PLACE (STAGE 3 TEST 2 ENGINE)')

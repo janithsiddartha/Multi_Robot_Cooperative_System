@@ -672,6 +672,28 @@ class WebTwinApp {
       });
     }
 
+    const stage3GripperSpeedSlider = document.getElementById('stage3-gripper-speed-slider');
+    const stage3GripperSpeedVal = document.getElementById('stage3-gripper-speed-val');
+    if (stage3GripperSpeedSlider) {
+      stage3GripperSpeedSlider.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value, 10);
+        if (stage3GripperSpeedVal) stage3GripperSpeedVal.textContent = `LEVEL ${val} / 10`;
+        this.send({ cmd: 'set_gripper_speed', robot_id: 'all', speed: val });
+        this.log(`Set global gripper speed to Level ${val}/10`, 'info');
+      });
+    }
+
+    const jogGripperSpeedSlider = document.getElementById('jog-gripper-speed-slider');
+    const jogGripperSpeedVal = document.getElementById('jog-gripper-speed-val');
+    if (jogGripperSpeedSlider) {
+      jogGripperSpeedSlider.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value, 10);
+        if (jogGripperSpeedVal) jogGripperSpeedVal.textContent = `LEVEL ${val} / 10`;
+        this.send({ cmd: 'set_gripper_speed', robot_id: this.activeJogRobot, speed: val });
+        this.log(`Set ${this.activeJogRobot.toUpperCase()} gripper speed to Level ${val}/10`, 'info');
+      });
+    }
+
     // Single-Robot Subtabs (Sliders / Direct IK / DH Parameters from testGUI 1, 2, 3)
     if (this.dom.jogSubtabBtns) {
       this.dom.jogSubtabBtns.forEach((btn) => {
@@ -2011,6 +2033,18 @@ class WebTwinApp {
       const s3Label = document.getElementById('stage3-speed-val');
       if (s3Slider && document.activeElement !== s3Slider) s3Slider.value = anySpeed;
       if (s3Label) s3Label.textContent = `LEVEL ${anySpeed} / 10`;
+
+      // Sync Gripper Speed Sliders
+      const anyGripSpeed = (activeRdata && activeRdata.gripper_speed) || 5;
+      const jogGripSlider = document.getElementById('jog-gripper-speed-slider');
+      const jogGripLabel = document.getElementById('jog-gripper-speed-val');
+      if (jogGripSlider && document.activeElement !== jogGripSlider) jogGripSlider.value = anyGripSpeed;
+      if (jogGripLabel) jogGripLabel.textContent = `LEVEL ${anyGripSpeed} / 10`;
+
+      const s3GripSlider = document.getElementById('stage3-gripper-speed-slider');
+      const s3GripLabel = document.getElementById('stage3-gripper-speed-val');
+      if (s3GripSlider && document.activeElement !== s3GripSlider) s3GripSlider.value = anyGripSpeed;
+      if (s3GripLabel) s3GripLabel.textContent = `LEVEL ${anyGripSpeed} / 10`;
     }
 
     if (this.dom.hwRosStatus) {
@@ -2026,6 +2060,12 @@ class WebTwinApp {
     const label = document.getElementById('jog-speed-val');
     if (slider && document.activeElement !== slider) slider.value = speed;
     if (label) label.textContent = `LEVEL ${speed} / 10`;
+
+    const gripSpeed = (rdata && rdata.gripper_speed !== undefined) ? rdata.gripper_speed : 5;
+    const gSlider = document.getElementById('jog-gripper-speed-slider');
+    const gLabel = document.getElementById('jog-gripper-speed-val');
+    if (gSlider && document.activeElement !== gSlider) gSlider.value = gripSpeed;
+    if (gLabel) gLabel.textContent = `LEVEL ${gripSpeed} / 10`;
   }
 
   _copyToClipboard(text, label = 'Data') {

@@ -105,6 +105,7 @@ unsigned long lastMotionUpdate = 0;
 // ============================================================
 
 int motionSpeed = 5;
+int gripperSpeed = 5;
 
 float speedDegPerSec[11] =
 {
@@ -350,17 +351,15 @@ void updateMotion()
   float dt =
     MOTION_UPDATE_MS / 1000.0;
 
-  float step =
-    speedDegPerSec[motionSpeed] *
-    dt;
-
-
   for (
     uint8_t channel = 0;
     channel < NUM_SERVOS;
     channel++
   )
   {
+    float channelSpeed = (channel == CH_GRIPPER) ? speedDegPerSec[gripperSpeed] : speedDegPerSec[motionSpeed];
+    float step = channelSpeed * dt;
+
     float difference =
       targetAngle[channel] -
       currentAngle[channel];
@@ -961,6 +960,23 @@ void processCommand(
     return;
   }
 
+
+  // ----------------------------------------------------------
+  // GRIPPER SPEED
+  // ----------------------------------------------------------
+
+  if (
+    strncmp(command, "SG,", 3) == 0
+  )
+  {
+    char *comma = strchr(command, ',');
+    if (comma != NULL) {
+      gripperSpeed = constrain(atoi(comma + 1), 1, 10);
+      Serial.print("GRIPPER_SPEED,");
+      Serial.println(gripperSpeed);
+    }
+    return;
+  }
 
   // ----------------------------------------------------------
   // SPEED

@@ -39,12 +39,15 @@ class HardwareTranslatorNode(Node):
         self.gripper_scale = self._get_required_param('gripper.scale')
         self.gripper_sign = self._get_required_param('gripper.sign')
         self.gripper_offset = self._get_required_param('gripper.offset')
+        self.arm_speed = 3
+        self.gripper_speed = 5
 
         # Subscribers
         self.create_subscription(String, 'control_mode', self.mode_callback, mode_qos)
         self.create_subscription(Float64MultiArray, 'joint_commands', self.joint_callback, 10)
         self.create_subscription(Float64MultiArray, 'gripper_command', self.gripper_callback, 10)
         self.create_subscription(Int32, 'robot_speed', self.speed_callback, 10)
+        self.create_subscription(Int32, 'gripper_speed', self.gripper_speed_callback, 10)
         self.create_subscription(String, 'robot_command', self.system_callback, 10)
 
         # Publisher for dumb relay
@@ -89,11 +92,17 @@ class HardwareTranslatorNode(Node):
         servo_angle = (self.gripper_sign * (angle / self.gripper_scale) + self.gripper_offset)
         servo_angle = int(round(max(-180.0, min(180.0, servo_angle))))
         
+        # Ensure gripper speed is communicated to hardware
+        self.publish_serial(f'SG,{self.gripper_speed}')
         self.publish_serial(f'J,{self.num_joints},{servo_angle}')
 
     def speed_callback(self, msg):
-        speed = max(1, min(10, int(msg.data)))
-        self.publish_serial(f'S,{speed}')
+        self.arm_speed = max(1, min(10, int(msg.data)))
+        self.publish_serial(f'S,{self.arm_speed}')
+
+    def gripper_speed_callback(self, msg):
+        self.gripper_speed = max(1, min(10, int(msg.data)))
+        self.publish_serial(f'SG,{self.gripper_speed}')
 
     def system_callback(self, msg):
         cmd = msg.data.strip().upper()

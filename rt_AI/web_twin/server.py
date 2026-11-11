@@ -1343,6 +1343,12 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
                         res = ros_bridge.set_speed(robot_id, speed)
                         await ws.send_str(json.dumps({"cmd": "speed_result", **res}))
 
+                    elif cmd == "set_gripper_speed":
+                        robot_id = data.get("robot_id", "robot1")
+                        speed = int(data.get("speed", 5))
+                        res = ros_bridge.set_gripper_speed(robot_id, speed)
+                        await ws.send_str(json.dumps({"cmd": "gripper_speed_result", **res}))
+
                     elif cmd == "set_gripper_limits":
                         robot_id = data.get("robot_id", "robot1")
                         open_d = float(data.get("open_deg", 90.0))

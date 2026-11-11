@@ -427,6 +427,63 @@
           "corridor_b_valid": true
         }
       }
+    },
+    "88089ec21f03fe53": {
+      "timestamp": "2026-11-11T21:56:36",
+      "pairs": {
+        "robot3_robot1": {
+          "pair_name": "robot3_robot1",
+          "handover_position_world": [
+            -12.5,
+            -12.5,
+            387.5
+          ],
+          "standoff_distance_mm": 50.0,
+          "robot_a_id": "robot3",
+          "robot_b_id": "robot1",
+          "robot_a_handover_q_deg": [
+            85.09,
+            -47.17,
+            23.58,
+            -11.02,
+            20.61,
+            13.86
+          ],
+          "robot_b_handover_q_deg": [
+            -3.01,
+            -11.56,
+            -0.64,
+            64.71,
+            89.48
+          ],
+          "robot_a_pre_handover_q_deg": [
+            81.78,
+            -36.42,
+            32.36,
+            -19.65,
+            -6.97,
+            13.86
+          ],
+          "robot_b_pre_handover_q_deg": [
+            -3.01,
+            -1.1,
+            1.51,
+            82.48,
+            89.48
+          ],
+          "handover_clearance_mm": 228.35,
+          "pre_handover_clearance_mm": 99.63,
+          "error_a_mm": 0.004,
+          "error_b_mm": 0.005,
+          "dot_z": -0.9849,
+          "dot_x": 0.0725,
+          "approach_angle_dev_deg": 9.96,
+          "approach_mode": "DUAL_SYNCHRONIZED",
+          "candidate_origin": "TOP_OF_WORKSPACE",
+          "corridor_a_valid": true,
+          "corridor_b_valid": true
+        }
+      }
     }
   }
 }

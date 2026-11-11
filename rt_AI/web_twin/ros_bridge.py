@@ -68,6 +68,7 @@ class WebTwinRosBridge:
                 "connected": False,
                 "control_mode": "MANUAL",
                 "speed": 5,
+                "gripper_speed": 5,
                 "gripper_angle": 90.0,
                 "gripper_open_deg": 90.0,
                 "gripper_close_deg": 0.0,
@@ -158,6 +159,7 @@ class WebTwinRosBridge:
                     self.publishers[r]["command"] = self.node.create_publisher(RosString, f"/{r}/robot_command", 10)
                     self.publishers[r]["control_mode_request"] = self.node.create_publisher(RosString, f"/{r}/control_mode_request", 10)
                     self.publishers[r]["speed"] = self.node.create_publisher(RosInt32, f"/{r}/robot_speed", 10)
+                    self.publishers[r]["gripper_speed"] = self.node.create_publisher(RosInt32, f"/{r}/gripper_speed", 10)
                     self.publishers[r]["manual_joints"] = self.node.create_publisher(Float64MultiArray, f"/{r}/manual_joint_command", 10)
                     self.publishers[r]["manual_gripper"] = self.node.create_publisher(Float64MultiArray, f"/{r}/manual_gripper_command", 10)
                     self.publishers[r]["ik_target"] = self.node.create_publisher(Float64MultiArray, f"/{r}/ik_gui_target", 10)
@@ -458,6 +460,20 @@ class WebTwinRosBridge:
         return {"success": True, "robot_id": robot_id, "speed": speed}
 
     set_robot_speed = set_speed
+
+    def set_gripper_speed(self, robot_id: str, speed: int) -> dict:
+        """Set independent gripper speed level (1 to 10) for hardware."""
+        speed = max(1, min(10, int(speed)))
+        targets = self.robot_names if robot_id in ["all", "ALL", None] else [robot_id]
+        for r in targets:
+            if r in self.robot_states:
+                self.robot_states[r]["gripper_speed"] = speed
+            if self.node and r in self.publishers and "gripper_speed" in self.publishers[r]:
+                msg = RosInt32()
+                msg.data = speed
+                self.publishers[r]["gripper_speed"].publish(msg)
+
+        return {"success": True, "robot_id": robot_id, "gripper_speed": speed}
 
     def set_gripper_limits(self, robot_id: str, open_deg: float, close_deg: float) -> dict:
         """Update customized open and close degree limits for gripper."""

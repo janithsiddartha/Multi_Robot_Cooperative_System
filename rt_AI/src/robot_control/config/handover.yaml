@@ -52,9 +52,9 @@ handover:
 
 execution:
   timings:
-    pick_grasp_wait_s: 2.0
-    handover_transfer_wait_s: 1.0
-    place_release_wait_s: 2.0
+    pick_grasp_wait_s: 3.0
+    handover_transfer_wait_s: 2.0
+    place_release_wait_s: 3.0
     step_interval_s: 0.05
     dwell_time_s: 0.5
   trajectory:
@@ -106,7 +106,7 @@ manual_handover:
     robot2_q: [90.0, 45.0, -90.0, -45.0, 0.0]
     robot3_q: [-90.0, 45.0, -90.0, -45.0, 0.0, 0.0]
   robot3_robot1:
-    robot3_pre_q: [90.0, 30.0, -60.0, -45.0, 0.0, 0.0]
-    robot1_pre_q: [-90.0, 30.0, -60.0, -45.0, 0.0]
-    robot3_q: [90.0, 45.0, -90.0, -45.0, 0.0, 0.0]
-    robot1_q: [-90.0, 45.0, -90.0, -45.0, 0.0]
+    robot3_pre_q: [73.3, -16.9, 17.2, -4.0, -31.2, 90.0]
+    robot1_pre_q: [16.1, -36.8, 70.4, 90.0, 0.0]
+    robot3_q: [72.0, -2.9, -31.0, -8.2, 11.7, 90.0]
+    robot1_q: [19.06, -36.8, 29.6, 61.9, 0.0]
