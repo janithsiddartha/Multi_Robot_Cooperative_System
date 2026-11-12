@@ -429,7 +429,7 @@
       }
     },
     "88089ec21f03fe53": {
-      "timestamp": "2026-11-11T21:56:36",
+      "timestamp": "2026-11-12T23:46:27",
       "pairs": {
         "robot3_robot1": {
           "pair_name": "robot3_robot1",
@@ -442,42 +442,201 @@
           "robot_a_id": "robot3",
           "robot_b_id": "robot1",
           "robot_a_handover_q_deg": [
-            85.09,
-            -47.17,
-            23.58,
-            -11.02,
-            20.61,
-            13.86
+            87.15,
+            -51.64,
+            29.57,
+            -8.01,
+            20.97,
+            -25.27
           ],
           "robot_b_handover_q_deg": [
             -3.01,
-            -11.56,
-            -0.64,
-            64.71,
-            89.48
+            -15.58,
+            6.12,
+            67.34,
+            56.51
           ],
           "robot_a_pre_handover_q_deg": [
-            81.78,
-            -36.42,
-            32.36,
-            -19.65,
-            -6.97,
-            13.86
+            84.03,
+            -44.01,
+            43.64,
+            -15.83,
+            -8.48,
+            -25.27
           ],
           "robot_b_pre_handover_q_deg": [
             -3.01,
-            -1.1,
-            1.51,
-            82.48,
-            89.48
+            -5.12,
+            8.31,
+            85.1,
+            56.51
           ],
-          "handover_clearance_mm": 228.35,
-          "pre_handover_clearance_mm": 99.63,
-          "error_a_mm": 0.004,
-          "error_b_mm": 0.005,
-          "dot_z": -0.9849,
-          "dot_x": 0.0725,
-          "approach_angle_dev_deg": 9.96,
+          "handover_clearance_mm": 227.5,
+          "pre_handover_clearance_mm": 99.43,
+          "error_a_mm": 0.0,
+          "error_b_mm": 0.0,
+          "dot_z": -0.9771,
+          "dot_x": 0.0001,
+          "approach_angle_dev_deg": 12.28,
+          "approach_mode": "DUAL_SYNCHRONIZED",
+          "candidate_origin": "TOP_OF_WORKSPACE",
+          "corridor_a_valid": true,
+          "corridor_b_valid": true
+        },
+        "robot2_robot3": {
+          "pair_name": "robot2_robot3",
+          "handover_position_world": [
+            137.5,
+            137.5,
+            412.5
+          ],
+          "standoff_distance_mm": 50.0,
+          "robot_a_id": "robot2",
+          "robot_b_id": "robot3",
+          "robot_a_handover_q_deg": [
+            -16.03,
+            8.68,
+            23.73,
+            -52.71,
+            -42.7
+          ],
+          "robot_b_handover_q_deg": [
+            37.95,
+            -21.78,
+            20.17,
+            -1.91,
+            -9.38,
+            -60.0
+          ],
+          "robot_a_pre_handover_q_deg": [
+            129.08,
+            -72.29,
+            51.93,
+            -21.25,
+            -51.27
+          ],
+          "robot_b_pre_handover_q_deg": [
+            38.39,
+            -12.54,
+            23.29,
+            -1.92,
+            -18.93,
+            -60.0
+          ],
+          "handover_clearance_mm": 246.86,
+          "pre_handover_clearance_mm": 97.39,
+          "error_a_mm": 0.013,
+          "error_b_mm": 0.014,
+          "dot_z": -0.9759,
+          "dot_x": 0.0026,
+          "approach_angle_dev_deg": 12.6,
+          "approach_mode": "ASYMMETRIC_A_FIRST",
+          "candidate_origin": "TOP_OF_WORKSPACE",
+          "corridor_a_valid": false,
+          "corridor_b_valid": true
+        },
+        "robot1_robot2": {
+          "pair_name": "robot1_robot2",
+          "handover_position_world": [
+            62.5,
+            12.5,
+            362.5
+          ],
+          "standoff_distance_mm": 50.0,
+          "robot_a_id": "robot1",
+          "robot_b_id": "robot2",
+          "robot_a_handover_q_deg": [
+            2.29,
+            -21.74,
+            -15.46,
+            37.39,
+            -90.0
+          ],
+          "robot_b_handover_q_deg": [
+            -4.26,
+            -6.67,
+            -3.9,
+            0.64,
+            86.58
+          ],
+          "robot_a_pre_handover_q_deg": [
+            2.29,
+            -8.19,
+            -15.39,
+            62.55,
+            -90.0
+          ],
+          "robot_b_pre_handover_q_deg": [
+            -5.88,
+            9.85,
+            -14.54,
+            2.12,
+            90.0
+          ],
+          "handover_clearance_mm": 239.07,
+          "pre_handover_clearance_mm": 99.61,
+          "error_a_mm": 0.0,
+          "error_b_mm": 0.0,
+          "dot_z": -0.9845,
+          "dot_x": 0.0149,
+          "approach_angle_dev_deg": 10.09,
+          "approach_mode": "DUAL_SYNCHRONIZED",
+          "candidate_origin": "TOP_OF_WORKSPACE",
+          "corridor_a_valid": true,
+          "corridor_b_valid": true
+        }
+      }
+    },
+    "af130a027160cc01": {
+      "timestamp": "2026-11-12T23:54:41",
+      "pairs": {
+        "robot3_robot1": {
+          "pair_name": "robot3_robot1",
+          "handover_position_world": [
+            -12.5,
+            -12.5,
+            387.5
+          ],
+          "standoff_distance_mm": 50.0,
+          "robot_a_id": "robot3",
+          "robot_b_id": "robot1",
+          "robot_a_handover_q_deg": [
+            87.31,
+            -53.64,
+            31.95,
+            -7.72,
+            21.89,
+            29.73
+          ],
+          "robot_b_handover_q_deg": [
+            -3.01,
+            -7.35,
+            -7.91,
+            61.46,
+            -67.03
+          ],
+          "robot_a_pre_handover_q_deg": [
+            83.74,
+            -47.97,
+            49.24,
+            -16.11,
+            -7.96,
+            29.73
+          ],
+          "robot_b_pre_handover_q_deg": [
+            -3.01,
+            3.2,
+            -5.83,
+            79.41,
+            -67.03
+          ],
+          "handover_clearance_mm": 226.9,
+          "pre_handover_clearance_mm": 99.29,
+          "error_a_mm": 0.0,
+          "error_b_mm": 0.0,
+          "dot_z": -0.9716,
+          "dot_x": 0.0,
+          "approach_angle_dev_deg": 13.68,
           "approach_mode": "DUAL_SYNCHRONIZED",
           "candidate_origin": "TOP_OF_WORKSPACE",
           "corridor_a_valid": true,

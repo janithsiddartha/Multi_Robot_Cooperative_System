@@ -176,8 +176,8 @@ def test_build_and_plan_stage3_test2(setup_test2_env):
         corridor_b_valid=True,
     )
 
-    pick_xyz = [100.0, 100.0, 200.0]
-    place_xyz = [0.0, 150.0, 150.0]
+    pick_xyz = [-100.0, 200.0, 150.0]
+    place_xyz = [-200.0, 50.0, 150.0]
 
     plan, pick_opts, place_opts = build_stage3_test2_plan(
         pick_xyz=pick_xyz,

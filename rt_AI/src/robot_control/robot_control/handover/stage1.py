@@ -69,10 +69,36 @@ def default_config_dir():
     return src_dir
 
 
+def load_execution_config(config_dir=None) -> dict:
+    """Load execution timings and trajectory settings from execution.yaml (with fallback to handover.yaml)."""
+    config_dir = config_dir or default_config_dir()
+    exec_path = os.path.join(config_dir, "execution.yaml")
+    if os.path.exists(exec_path):
+        with open(exec_path, "r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+            if "execution" in data:
+                return data["execution"]
+            return data
+    ho_path = os.path.join(config_dir, "handover.yaml")
+    if os.path.exists(ho_path):
+        with open(ho_path, "r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+            return data.get("execution", {})
+    return {}
+
+
 def load_stage1_robots(config_dir=None):
     config_dir = config_dir or default_config_dir()
     with open(os.path.join(config_dir, "handover.yaml"), "r", encoding="utf-8") as handle:
         handover_cfg = yaml.safe_load(handle) or {}
+
+    # Seamlessly merge execution config from dedicated execution.yaml if present
+    exec_path = os.path.join(config_dir, "execution.yaml")
+    if os.path.exists(exec_path):
+        with open(exec_path, "r", encoding="utf-8") as handle:
+            exec_data = yaml.safe_load(handle) or {}
+            if "execution" in exec_data:
+                handover_cfg["execution"] = exec_data["execution"]
 
     robots = {}
     robot_yaml_paths = {}

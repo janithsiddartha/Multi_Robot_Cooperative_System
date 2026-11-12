@@ -279,9 +279,11 @@ class RobotGUI(Node):
 
         self.robot_id = namespace if namespace else 'robot1'
         try:
-            _, all_robots, _ = load_stage1_robots()
+            hcfg, all_robots, _ = load_stage1_robots()
+            self.handover_cfg = hcfg
             self.solver_cfg = all_robots.get(self.robot_id, self.config)
         except Exception:
+            self.handover_cfg = {}
             self.solver_cfg = self.config
 
         if not hasattr(self.solver_cfg, 'world_base_xyz'):
@@ -293,11 +295,13 @@ class RobotGUI(Node):
         if not hasattr(self.solver_cfg, 'gripper_approach_axis'):
             self.solver_cfg.gripper_approach_axis = 'z'
 
-        self.dwell_time_s = 2.0
-        self.pick_wait_s = 2.0
-        self.place_wait_s = 2.0
-        self.step_interval_s = 0.04
-        self.trajectory_steps = 25
+        exec_cfg = self.handover_cfg.get('execution', {})
+        timings = exec_cfg.get('timings', {})
+        self.pick_wait_s = float(timings.get('pick_grasp_wait_s', 3.0))
+        self.place_wait_s = float(timings.get('place_release_wait_s', 3.0))
+        self.dwell_time_s = float(timings.get('dwell_time_s', 0.5))
+        self.step_interval_s = float(timings.get('step_interval_s', 0.05))
+        self.trajectory_steps = int(exec_cfg.get('trajectory', {}).get('steps', 30))
         self.is_trajectory_running = False
         self.abort_trajectory = False
         self.trajectory_thread = None
@@ -2906,7 +2910,7 @@ class RobotGUI(Node):
 
             # 5. Build phases of motion
             steps = self.trajectory_steps
-            dt = max(0.02, 0.08 - (self.speed * 0.006))
+            dt = max(0.015, self.step_interval_s - ((self.speed - 3) * 0.005))
 
             self.root.after(0, lambda: self.status_label.config(
                 text=f"Planned: Pick ({pick_desc}) -> Place ({place_desc})"
@@ -3006,16 +3010,16 @@ class RobotGUI(Node):
                 return
             current_exec_q = result_q
 
-            # Phase 2: Reached Pick Target -> Wait 2 sec -> Grasp (close) -> Wait 2 sec
-            self.root.after(0, lambda: self.task_status_label.config(text="Task Status: Reached pick target, waiting 2s..."))
-            if not sleep_check_abort(2.0):
+            # Phase 2: Reached Pick Target -> Wait dwell -> Grasp (close) -> Wait pick_wait_s
+            self.root.after(0, lambda: self.task_status_label.config(text=f"Task Status: Reached pick target, settling {self.dwell_time_s}s..."))
+            if not sleep_check_abort(self.dwell_time_s):
                 self._on_trajectory_abort()
                 return
 
             self.root.after(0, lambda: self.task_status_label.config(text="Task Status: Closing gripper (grasp)..."))
             self._send_trajectory_gripper(close_angle)
 
-            if not sleep_check_abort(2.0):
+            if not sleep_check_abort(self.pick_wait_s):
                 self._on_trajectory_abort()
                 return
 
@@ -3045,16 +3049,16 @@ class RobotGUI(Node):
                 return
             current_exec_q = result_q
 
-            # Phase 5: Reached Place Target -> Wait 2 sec -> Release (open) -> Wait 2 sec
-            self.root.after(0, lambda: self.task_status_label.config(text="Task Status: Reached place target, waiting 2s..."))
-            if not sleep_check_abort(2.0):
+            # Phase 5: Reached Place Target -> Wait dwell -> Release (open) -> Wait place_wait_s
+            self.root.after(0, lambda: self.task_status_label.config(text=f"Task Status: Reached place target, settling {self.dwell_time_s}s..."))
+            if not sleep_check_abort(self.dwell_time_s):
                 self._on_trajectory_abort()
                 return
 
             self.root.after(0, lambda: self.task_status_label.config(text="Task Status: Opening gripper (release)..."))
             self._send_trajectory_gripper(open_angle)
 
-            if not sleep_check_abort(2.0):
+            if not sleep_check_abort(self.place_wait_s):
                 self._on_trajectory_abort()
                 return
 

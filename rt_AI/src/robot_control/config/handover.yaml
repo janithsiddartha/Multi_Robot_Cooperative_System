@@ -50,16 +50,8 @@ handover:
     samples: 100
     max_duration: 30.0
 
-execution:
-  timings:
-    pick_grasp_wait_s: 3.0
-    handover_transfer_wait_s: 2.0
-    place_release_wait_s: 3.0
-    step_interval_s: 0.05
-    dwell_time_s: 0.5
-  trajectory:
-    steps: 30
-    stagger_delay_ratio: 0.35
+# Note: Execution timings, step intervals, and dwell delays are maintained in
+# execution.yaml so editing them never alters kinematic fingerprints or invalidates caches.
 
 object_pick_ik:
   finger_axis: "x"

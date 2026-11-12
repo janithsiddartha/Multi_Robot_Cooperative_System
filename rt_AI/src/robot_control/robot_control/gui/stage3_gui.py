@@ -593,12 +593,38 @@ class Stage3GUI(Node):
         )
         self.btn_inspect_ho.pack(side="left", padx=(0, 4))
 
+        tk.Label(
+            action_row1, text="⚡ Recompute:", font=("Helvetica", 7, "bold"),
+            bg=self.card_color, fg="#2980B9"
+        ).pack(side="left", padx=(0, 2))
+
+        self.btn_recomp_12 = tk.Button(
+            action_row1, text="1-2", font=("Helvetica", 7, "bold"),
+            bg="#EAF2F8", fg="#2980B9", relief="flat", padx=3, pady=1, cursor="hand2",
+            command=lambda: self._on_recompute_single_pair("robot1_robot2")
+        )
+        self.btn_recomp_12.pack(side="left", padx=1)
+
+        self.btn_recomp_23 = tk.Button(
+            action_row1, text="2-3", font=("Helvetica", 7, "bold"),
+            bg="#EAF2F8", fg="#2980B9", relief="flat", padx=3, pady=1, cursor="hand2",
+            command=lambda: self._on_recompute_single_pair("robot2_robot3")
+        )
+        self.btn_recomp_23.pack(side="left", padx=1)
+
+        self.btn_recomp_31 = tk.Button(
+            action_row1, text="3-1", font=("Helvetica", 7, "bold"),
+            bg="#EAF2F8", fg="#2980B9", relief="flat", padx=3, pady=1, cursor="hand2",
+            command=lambda: self._on_recompute_single_pair("robot3_robot1")
+        )
+        self.btn_recomp_31.pack(side="left", padx=1)
+
         self.btn_recompute_ho = tk.Button(
-            action_row1, text="⚡ Recompute", font=("Helvetica", 7, "bold"),
-            bg="#EAF2F8", fg="#2980B9", relief="flat", padx=4, pady=2, cursor="hand2",
+            action_row1, text="ALL", font=("Helvetica", 7, "bold"),
+            bg="#2980B9", fg="#FFFFFF", relief="flat", padx=4, pady=1, cursor="hand2",
             command=self._on_recompute_handover_clicked
         )
-        self.btn_recompute_ho.pack(side="left")
+        self.btn_recompute_ho.pack(side="left", padx=(2, 0))
 
         self.ho_recomp_msg = tk.Label(
             action_row1, text="✓ Cached", bg=self.card_color, fg=self.success_color, font=("Helvetica", 7, "italic")
@@ -1198,6 +1224,13 @@ class Stage3GUI(Node):
         self._log(f"[CACHE RELOAD] Reloading handover cache from {self.auto_handover_cache_path}...")
         try:
             poses = load_auto_handover_cache(self.auto_handover_cache_path, self.config_fingerprint)
+            if not poses:
+                try:
+                    from robot_control.handover.stage3_test2_solver import load_test2_handover_cache, resolve_test2_handover_cache_path
+                    test2_path = resolve_test2_handover_cache_path()
+                    poses = load_test2_handover_cache(test2_path, self.config_fingerprint)
+                except Exception:
+                    pass
             if poses:
                 self.auto_handover_poses = poses
                 self.ho_recomp_msg.config(text=f"✓ Loaded {len(poses)} pairs", fg=self.success_color)
@@ -1687,7 +1720,8 @@ class Stage3GUI(Node):
 
                 def on_done():
                     self.is_recomputing_handover = False
-                    self.btn_recompute_ho.config(state="normal", text="⚡ Recompute")
+                    self._set_recompute_buttons_state("normal")
+                    self.btn_recompute_ho.config(text="ALL")
                     self.ho_recomp_msg.config(text=f"✓ Saved {len(poses)} pairs", fg=self.success_color)
                     self._update_handover_status_card()
                     self._update_3d()
@@ -1697,9 +1731,69 @@ class Stage3GUI(Node):
             except Exception as e:
                 def on_err(err=str(e)):
                     self.is_recomputing_handover = False
-                    self.btn_recompute_ho.config(state="normal", text="⚡ Recompute")
+                    self._set_recompute_buttons_state("normal")
+                    self.btn_recompute_ho.config(text="ALL")
                     self.ho_recomp_msg.config(text="Error", fg=self.danger_color)
                     self._log(f"ERROR recomputing handover poses: {err}")
+
+                self.root.after(0, on_err)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _set_recompute_buttons_state(self, state: str):
+        for btn_name in ('btn_recomp_12', 'btn_recomp_23', 'btn_recomp_31', 'btn_recompute_ho'):
+            if hasattr(self, btn_name):
+                getattr(self, btn_name).config(state=state)
+
+    def _on_recompute_single_pair(self, pair_name: str):
+        """Recompute handover pose for a single pair."""
+        if getattr(self, 'is_recomputing_handover', False):
+            return
+
+        self.is_recomputing_handover = True
+        self.selected_ho_pair.set(pair_name)
+        self._set_recompute_buttons_state("disabled")
+        self.ho_recomp_msg.config(text=f"Solving {pair_name}...", fg=self.accent_color)
+        self._log(f"\n⚡ Starting Handover Recomputation for {pair_name}...")
+
+        def progress_cb(msg: str):
+            self.root.after(0, lambda m=msg: self._log(f"  [Solver] {m}"))
+
+        def worker():
+            try:
+                from robot_control.handover.stage3_test2_solver import compute_single_test2_handover_pose, resolve_test2_handover_cache_path, load_test2_handover_cache
+                cache_path = resolve_test2_handover_cache_path()
+                pose = compute_single_test2_handover_pose(
+                    pair_name=pair_name,
+                    robots=self.robots,
+                    handover_cfg=self.handover_cfg,
+                    cache_path=cache_path,
+                    progress_callback=progress_cb,
+                )
+
+                def on_done():
+                    self.is_recomputing_handover = False
+                    self._set_recompute_buttons_state("normal")
+                    all_poses = load_test2_handover_cache(cache_path, self.config_fingerprint) or {}
+                    if pose is not None:
+                        all_poses[pair_name] = pose
+                        self.auto_handover_poses = all_poses
+                        self.ho_recomp_msg.config(text=f"✓ {pair_name} Saved", fg=self.success_color)
+                        self._log(f"✓ Recomputation complete for {pair_name}! Saved to cache.")
+                    else:
+                        self.auto_handover_poses = all_poses
+                        self.ho_recomp_msg.config(text="⚠️ No solution", fg=self.warning_color)
+                        self._log(f"⚠️ No valid handover solution found for {pair_name}.")
+                    self._update_handover_status_card()
+                    self._update_3d()
+
+                self.root.after(0, on_done)
+            except Exception as e:
+                def on_err(err=str(e)):
+                    self.is_recomputing_handover = False
+                    self._set_recompute_buttons_state("normal")
+                    self.ho_recomp_msg.config(text="Error", fg=self.danger_color)
+                    self._log(f"ERROR recomputing handover pose for {pair_name}: {err}")
 
                 self.root.after(0, on_err)
 

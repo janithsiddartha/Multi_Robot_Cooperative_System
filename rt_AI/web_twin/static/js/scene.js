@@ -177,17 +177,8 @@ class WebTwinScene {
     this.scene.add(grid);
 
 
-    // Handover Zone Floating Ring (Z = 362.5 mm directly)
-    const hoRingGeo = new THREE.TorusGeometry(80, 2.5, 16, 64);
-    const hoRingMat = new THREE.MeshBasicMaterial({
-      color: 0x00FF9D,
-      transparent: true,
-      opacity: 0.65,
-    });
-    this.hoRing = new THREE.Mesh(hoRingGeo, hoRingMat);
-    this.hoRing.position.set(37.5, 37.5, 362.5);
-    this.hoRing.visible = false; // Hide floating torus to prevent visual clutter and arm intersection
-    this.scene.add(this.hoRing);
+    // Handover Zone Floating Ring - removed to avoid visual clutter and arm intersection
+    this.hoRing = null;
   }
 
   _initTargetsAndGizmos() {

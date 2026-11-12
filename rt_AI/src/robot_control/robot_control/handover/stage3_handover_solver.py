@@ -187,8 +187,8 @@ def load_auto_handover_cache(cache_path: str, config_hash: str) -> Optional[Dict
     try:
         with open(cache_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # Require version 2.0 to ensure P0 orientation constraints are satisfied
-        if data.get("version") != "2.0":
+        # Accept version 2.0 or 2.0-test2/test
+        if data.get("version") not in ("2.0", "2.0-test2", "2.0-test"):
             return None
         fp_data = data.get("fingerprints", {}).get(config_hash, {})
         pairs_data = fp_data.get("pairs", {})

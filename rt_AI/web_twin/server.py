@@ -138,6 +138,15 @@ class WebTwinEngine:
         # Load Stage 3 Test 2 auto-handover poses
         self.cache_path = resolve_test2_handover_cache_path()
         self.auto_poses = {}
+
+        exec_cfg = self.handover_cfg.get('execution', {})
+        timings = exec_cfg.get('timings', {})
+        self.pick_wait_s = float(timings.get('pick_grasp_wait_s', 3.0))
+        self.transfer_wait_s = float(timings.get('handover_transfer_wait_s', 2.0))
+        self.place_wait_s = float(timings.get('place_release_wait_s', 3.0))
+        self.step_interval_s = float(timings.get('step_interval_s', 0.05))
+        self.dwell_time_s = float(timings.get('dwell_time_s', 0.5))
+        self.trajectory_steps = int(exec_cfg.get('trajectory', {}).get('steps', 30))
         if os.path.exists(self.cache_path):
             try:
                 self.auto_poses = load_test2_handover_cache(self.cache_path, self.fingerprint) or {}
@@ -1022,13 +1031,13 @@ class WebTwinEngine:
         steps_payload = []
         phase_definitions = [
             (1, "Phase 1: Approach Pre-Pick (+50mm) & Cartesian Descent (-Z)", traj_result.phase1_simultaneous),
-            (2, "Phase 2: Settle & Gripper Grasp (Dwell)", None),  # Dwell 2.0s
+            (2, f"Phase 2: Settle & Gripper Grasp (Dwell {self.pick_wait_s}s)", None),
             (3, "Phase 3: Cartesian Lift (+50mm) & Transit to Pre-Handover", traj_result.phase3_pick_to_pre_handover),
             (4, "Phase 4: Synchronized Advance along Handover Corridors", traj_result.phase4_advance_to_handover),
-            (5, "Phase 5: Gripper Handover Transfer (Dwell)", None),  # Dwell 1.0s
+            (5, f"Phase 5: Gripper Handover Transfer (Dwell {self.transfer_wait_s}s)", None),
             (6, "Phase 6: Synchronized Retraction along Reverse Corridors", traj_result.phase6_retract_to_pre_handover),
             (7, "Phase 7: Transfer to Pre-Place (+50mm) & Cartesian Descent (-Z)", traj_result.phase7_handover_to_place),
-            (8, "Phase 8: Settle & Gripper Release (Dwell)", None),  # Dwell 2.0s
+            (8, f"Phase 8: Settle & Gripper Release (Dwell {self.place_wait_s}s)", None),
             (9, "Phase 9: Cartesian Retract (+50mm) & Simultaneous Return Home", traj_result.phase9_simultaneous_home),
         ]
 
@@ -1134,7 +1143,7 @@ class WebTwinEngine:
                     g_place = g_act
                 else:
                     g_pick = "close" if phase_num in (2, 5) else "open"
-                    g_place = "close" if phase_num in (5, 8) else "open"
+                    g_place = "close" if phase_num in (5,) else "open"
                 frame_data = self.compute_frames(current_joint_state)
                 dist_mm, pt_a, pt_b = compute_laser_endpoints(
                     np.array(current_joint_state[pick_r]),
@@ -1213,16 +1222,23 @@ class WebTwinEngine:
                 "Planning collision-free synchronized trajectories...",
                 f"Min predicted body clearance: {clr_display_str} (Safe dist: {safe_dist:.1f} mm)",
                 f">>> 1. SIMULTANEOUS: {pick_r} approaches Pre-Pick (+50mm) & Cartesian descends (-Z) to Pick. WHILE {place_r if plan.needs_handover else 'other'} moves to Pre-Handover!",
-                f">>> 2. {pick_r} dwells 2.0s, closes gripper (grasp), and dwells 2.0s. ({place_r if plan.needs_handover else 'other'} waiting at Pre-Handover)",
+                f">>> 2. {pick_r} settles ({self.dwell_time_s}s), closes gripper (grasp), and dwells {self.pick_wait_s}s. ({place_r if plan.needs_handover else 'other'} waiting at Pre-Handover)",
                 f">>> 3. {pick_r} Cartesian lifts (+50mm) to Pre-Pick and transfers to Pre-Handover.",
                 f">>> 4. ADVANCE: Both robots enter Handover mating corridor." if plan.needs_handover else ">>> 4. Transit directly to Pre-Place.",
-                f">>> 5. HANDOVER TRANSFER: {place_r} closes gripper, {pick_r} opens gripper." if plan.needs_handover else ">>> 5. Continuous transfer.",
+                f">>> 5. HANDOVER TRANSFER: {place_r} closes gripper (waits {self.transfer_wait_s}s), {pick_r} opens gripper (waits {self.transfer_wait_s}s)." if plan.needs_handover else ">>> 5. Continuous transfer.",
                 f">>> 6. RETRACT: Both robots retreat safely back to Pre-Handover along reverse corridors." if plan.needs_handover else ">>> 6. Settle.",
                 f">>> 7. {place_r} transfers to Pre-Place (+50mm) & Cartesian descends (-Z) to Place Target.",
-                f">>> 8. {place_r} dwells 2.0s, opens gripper at Place Target, and dwells 2.0s.",
+                f">>> 8. {place_r} settles ({self.dwell_time_s}s), opens gripper at Place Target, and dwells {self.place_wait_s}s.",
                 f">>> 9. {place_r} Cartesian retracts (+50mm) to Pre-Place & SIMULTANEOUS RETURN: Both robots return to Home!",
                 "✓ Task completed successfully!",
             ],
+            "timings": {
+                "pick_grasp_wait_s": self.pick_wait_s,
+                "handover_transfer_wait_s": self.transfer_wait_s,
+                "place_release_wait_s": self.place_wait_s,
+                "step_interval_s": self.step_interval_s,
+                "dwell_time_s": self.dwell_time_s,
+            },
             "steps": steps_payload,
         }
 

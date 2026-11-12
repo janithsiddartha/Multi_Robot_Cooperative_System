@@ -1329,6 +1329,7 @@ class WebTwinApp {
       this.currentPlanSummary = data.plan_summary;
       this.currentPlanKey = this._getCurrentTargetKey();
       this.trajectorySteps = data.steps;
+      this.executionTimings = data.timings;
       this.currentStepIdx = 0;
 
       this.dom.timelineSlider.max = this.trajectorySteps.length - 1;
@@ -2258,22 +2259,34 @@ class WebTwinApp {
 
       // Determine step delay based on phase and timings (matching Tkinter GUI pacing)
       const step = this.trajectorySteps[this.currentStepIdx];
-      let delayMs = 65; // Base pace matching Tkinter GUI step_interval
+      const timings = this.executionTimings || {
+        pick_grasp_wait_s: 3.0,
+        handover_transfer_wait_s: 2.0,
+        place_release_wait_s: 3.0,
+        step_interval_s: 0.05,
+        dwell_time_s: 0.5,
+      };
+
+      const stepIntervalMs = Math.round((timings.step_interval_s || 0.05) * 1000);
+      let delayMs = stepIntervalMs;
 
       // Dwell phases in Stage 3 Test 2
-      if (step && step.phase_num === 2) {
-        delayMs = 1200; // Phase 2: Grasp dwell (2.0s in hardware, 1.2s in sim)
-      } else if (step && step.phase_num === 5) {
-        delayMs = 800;  // Phase 5: Transfer dwell (1.0s in hardware, 0.8s in sim)
-      } else if (step && step.phase_num === 8) {
-        delayMs = 1200; // Phase 8: Release dwell (2.0s in hardware, 1.2s in sim)
+      const phase = step ? (step.phase_number || step.phase_num) : null;
+      if (phase === 2) {
+        delayMs = Math.round(((timings.dwell_time_s || 0.5) + (timings.pick_grasp_wait_s || 3.0)) * 1000); // Grasp dwell (3.5s)
+      } else if (phase === 5) {
+        delayMs = Math.round(((timings.handover_transfer_wait_s || 2.0) * 2) * 1000); // Transfer dwell (4.0s)
+      } else if (phase === 8) {
+        delayMs = Math.round(((timings.dwell_time_s || 0.5) + (timings.place_release_wait_s || 3.0)) * 1000); // Release dwell (3.5s)
       }
 
       const scaledDelay = Math.max(10, Math.round(delayMs / this.playbackSpeed));
       this.playbackTimer = setTimeout(scheduleNext, scaledDelay);
     };
 
-    const initialDelay = Math.max(10, Math.round(65 / this.playbackSpeed));
+    const timings = this.executionTimings || { step_interval_s: 0.05 };
+    const stepIntervalMs = Math.round((timings.step_interval_s || 0.05) * 1000);
+    const initialDelay = Math.max(10, Math.round(stepIntervalMs / this.playbackSpeed));
     if (this.playbackTimer) clearTimeout(this.playbackTimer);
     this.playbackTimer = setTimeout(scheduleNext, initialDelay);
   }

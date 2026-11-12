@@ -1,0 +1,15 @@
+# Stage 3 Multi-Robot Execution Timings & Trajectory Settings
+# These settings control hardware dwells, wait times, and trajectory interpolation.
+# Changes in this file do NOT affect kinematics, DH math, or handover cache fingerprints.
+
+execution:
+  timings:
+    pick_grasp_wait_s: 3.0
+    handover_transfer_wait_s: 2.0
+    place_release_wait_s: 3.0
+    step_interval_s: 0.05
+    dwell_time_s: 0.5
+  trajectory:
+    steps: 30
+    stagger_delay_ratio: 0.35
+

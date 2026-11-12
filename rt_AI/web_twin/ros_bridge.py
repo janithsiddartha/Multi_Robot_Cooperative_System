@@ -558,7 +558,7 @@ class WebTwinRosBridge:
 
                     self._execution_step = idx + 1
                     jstate = step.get("joint_state", {})
-                    grippers = step.get("gripper_state", {})
+                    grippers = step.get("grippers", step.get("gripper_state", {}))
 
                     for r, q_vals in jstate.items():
                         if self.twin_engine:
@@ -586,7 +586,18 @@ class WebTwinRosBridge:
                             msg.data = [float(ang)]
                             self.publishers[r]["manual_gripper"].publish(msg)
 
-                    time.sleep(step_delay)
+                    phase_n = step.get("phase_number")
+                    # If this is a dwell step (Phase 2 grasp, Phase 5 transfer, Phase 8 release), wait the configured dwell duration
+                    if phase_n == 2:
+                        actual_delay = 3.0
+                    elif phase_n == 5:
+                        actual_delay = 2.0
+                    elif phase_n == 8:
+                        actual_delay = 3.0
+                    else:
+                        actual_delay = step_delay or 0.05
+
+                    time.sleep(actual_delay)
             except Exception as e:
                 print(f"[WebTwin ROS] Error in hardware trajectory execution stream: {e}")
             finally:

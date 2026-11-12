@@ -76,10 +76,12 @@ class Stage3Test2GUI(Stage3GUI):
         self.root.configure(bg=self.bg_color)
 
         self.dwell_time_s = 0.5
-        self.pick_wait_s = 1.0
+        self.pick_wait_s = 3.0
+        self.transfer_wait_s = 2.0
+        self.place_wait_s = 3.0
         self.step_interval_s = 0.05
         self.safe_dist = 50.0
-        self.trajectory_steps = 25
+        self.trajectory_steps = 30
 
         # Initialize configurations and paths
         try:
@@ -104,9 +106,9 @@ class Stage3Test2GUI(Stage3GUI):
 
         exec_cfg = self.handover_cfg.get('execution', {})
         timings = exec_cfg.get('timings', {})
-        self.pick_wait_s = float(timings.get('pick_grasp_wait_s', 2.0))
-        self.transfer_wait_s = float(timings.get('handover_transfer_wait_s', 1.0))
-        self.place_wait_s = float(timings.get('place_release_wait_s', 2.0))
+        self.pick_wait_s = float(timings.get('pick_grasp_wait_s', 3.0))
+        self.transfer_wait_s = float(timings.get('handover_transfer_wait_s', 2.0))
+        self.place_wait_s = float(timings.get('place_release_wait_s', 3.0))
         self.step_interval_s = float(timings.get('step_interval_s', 0.05))
         self.dwell_time_s = float(timings.get('dwell_time_s', 0.5))
         self.trajectory_steps = int(exec_cfg.get('trajectory', {}).get('steps', 30))
@@ -1207,13 +1209,16 @@ class Stage3Test2GUI(Stage3GUI):
                 status = "safe" if step.is_safe else "warn"
                 self._update_clearance_ui(step.min_clearance_mm, "MOTION ACTIVE", status)
                 self.root.after(0, self._update_3d)
-                effective_dt = max(0.015, 0.08 - (getattr(self, 'speed', 3) * 0.006))
+                spd = max(1, min(10, getattr(self, 'speed', 3)))
+                effective_dt = max(0.015, self.step_interval_s - ((spd - 3) * 0.005))
                 time.sleep(effective_dt)
             time.sleep(dwell)
 
         if plan.needs_handover:
-            # PHASE 0: PROACTIVE OPEN GRIPPER FOR APPROACH
+            # PHASE 0: PROACTIVE OPEN GRIPPERS FOR BOTH PICK AND PLACE ROBOTS
+            self._log(f"0. APPROACH PREPARATION: Proactively commanding grippers OPEN on {pick_rid} and {place_rid}.")
             self._send_gripper_command(pick_rid, 'open', real_robot=real_robot)
+            self._send_gripper_command(place_rid, 'open', real_robot=real_robot)
 
             # PHASE 1: SIMULTANEOUS MOTION (Pre-Pick approach + Cartesian descent to Pick)
             step_simultaneous(
@@ -1222,8 +1227,12 @@ class Stage3Test2GUI(Stage3GUI):
                 dwell=self.dwell_time_s,
             )
 
+            # Re-affirm OPEN gripper on pick_rid at Pick target before grasp, and confirm place_rid open at Pre-Handover
+            self._send_gripper_command(pick_rid, 'open', real_robot=real_robot)
+            self._send_gripper_command(place_rid, 'open', real_robot=real_robot)
+
             # PHASE 2: GRASP AT PICK
-            self._log(f"2. {pick_rid} dwells {self.pick_wait_s}s, closes gripper (grasp), and dwells {self.pick_wait_s}s. ({place_rid} waiting at Pre-Handover)")
+            self._log(f"2. {pick_rid} settles ({self.dwell_time_s}s), closes gripper (grasp), and waits {self.pick_wait_s}s. ({place_rid} waiting at Pre-Handover)")
             time.sleep(self.dwell_time_s)
             self._send_gripper_command(pick_rid, 'close', real_robot=real_robot)
             self._update_clearance_ui(self.live_clearance_mm, f"{place_rid} WAITING AT PRE-HANDOVER", "info")
@@ -1236,6 +1245,10 @@ class Stage3Test2GUI(Stage3GUI):
                 dwell=self.dwell_time_s,
             )
 
+            # Re-affirm place_rid gripper is fully OPEN before advancing into Handover mating corridor
+            self._log(f"4. APPROACH MATING: Re-affirming {place_rid} gripper OPEN for handover reception.")
+            self._send_gripper_command(place_rid, 'open', real_robot=real_robot)
+
             # PHASE 4: BOTH ADVANCE INTO HANDOVER
             step_simultaneous(
                 traj_result.phase4_advance_to_handover,
@@ -1244,7 +1257,7 @@ class Stage3Test2GUI(Stage3GUI):
             )
 
             # PHASE 5: TRANSFER
-            self._log(f"5. HANDOVER TRANSFER: {place_rid} closes gripper, {pick_rid} opens gripper.")
+            self._log(f"5. HANDOVER TRANSFER: {place_rid} closes gripper (waits {self.transfer_wait_s}s), {pick_rid} opens gripper (waits {self.transfer_wait_s}s).")
             self._send_gripper_command(place_rid, 'close', real_robot=real_robot)
             time.sleep(self.transfer_wait_s)
             self._send_gripper_command(pick_rid, 'open', real_robot=real_robot)
@@ -1265,7 +1278,7 @@ class Stage3Test2GUI(Stage3GUI):
             )
 
             # PHASE 8: RELEASE
-            self._log(f"8. {place_rid} dwells {self.place_wait_s}s, opens gripper at Place Target, and dwells {self.place_wait_s}s.")
+            self._log(f"8. {place_rid} settles ({self.dwell_time_s}s), opens gripper at Place Target, and dwells {self.place_wait_s}s.")
             time.sleep(self.dwell_time_s)
             self._send_gripper_command(place_rid, 'open', real_robot=real_robot)
             time.sleep(self.place_wait_s)
@@ -1278,16 +1291,18 @@ class Stage3Test2GUI(Stage3GUI):
             )
         else:
             # SINGLE ROBOT
+            self._log(f"0. APPROACH PREPARATION: Proactively commanding gripper OPEN on {pick_rid}.")
             self._send_gripper_command(pick_rid, 'open', real_robot=real_robot)
-            step_simultaneous(traj_result.phase1_simultaneous, f"1. {pick_rid} approaches Pre-Pick (+50mm) & Cartesian descends (-Z) to Pick Target.")
+            step_simultaneous(traj_result.phase1_simultaneous, f"1. {pick_rid} approaches Pre-Pick (+50mm) & Cartesian descends (-Z) to Pick Target.", dwell=self.dwell_time_s)
+            self._send_gripper_command(pick_rid, 'open', real_robot=real_robot)
             time.sleep(self.dwell_time_s)
             self._send_gripper_command(pick_rid, 'close', real_robot=real_robot)
             time.sleep(self.pick_wait_s)
-            step_simultaneous(traj_result.phase7_handover_to_place, f"2. {pick_rid} Cartesian lifts (+50mm), transfers to Pre-Place, & Cartesian descends (-Z) to Place Target.")
+            step_simultaneous(traj_result.phase7_handover_to_place, f"2. {pick_rid} Cartesian lifts (+50mm), transfers to Pre-Place, & Cartesian descends (-Z) to Place Target.", dwell=self.dwell_time_s)
             time.sleep(self.dwell_time_s)
             self._send_gripper_command(pick_rid, 'open', real_robot=real_robot)
             time.sleep(self.place_wait_s)
-            step_simultaneous(traj_result.phase9_simultaneous_home, f"3. {pick_rid} Cartesian retracts (+50mm) to Pre-Place and returns home.")
+            step_simultaneous(traj_result.phase9_simultaneous_home, f"3. {pick_rid} Cartesian retracts (+50mm) to Pre-Place and returns home.", dwell=self.dwell_time_s)
 
         self._set_control_mode(pick_rid, 'POSITION', real_robot=real_robot)
         if plan.needs_handover:
