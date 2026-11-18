@@ -42,6 +42,12 @@
           <span id="ws-status-dot" class="status-dot disconnected"></span>
           <span id="ws-status-text">CONNECTING...</span>
         </div>
+        <div class="telemetry-item" id="item-view-mode">
+          <span id="badge-view-mode" class="view-mode-pill live"><i class="fa fa-satellite-dish"></i> LIVE TELEMETRY</span>
+          <button id="btn-toggle-view-mode" class="btn btn-xs btn-glass" style="display:none; margin-left:6px;" title="Exit simulation preview and snap to live robot telemetry">
+            <i class="fa fa-arrow-rotate-left"></i> Live View
+          </button>
+        </div>
         <div class="telemetry-item">
           <i class="fa fa-shield-halved" style="color: var(--status-safe);"></i>
           <span>Collision Gate: <strong>45.0 mm</strong></span>
@@ -130,6 +136,9 @@
           </button>
           <button class="mode-nav-btn" data-tab="tab-inspector" title="Pre-Handover & Standoff Pose Inspector">
             <i class="fa fa-handshake"></i> Stances
+          </button>
+          <button class="mode-nav-btn" data-tab="tab-ai-agent" title="Autonomous AI Multi-Robot Orchestrator">
+            <i class="fa fa-brain" style="color: var(--robot1-cyan);"></i> AI Agent
           </button>
         </nav>
 
@@ -822,6 +831,95 @@
             <button id="btn-inspect-home" class="btn btn-glass btn-full">
               <i class="fa fa-house"></i> 🏠 Return All to Home
             </button>
+          </section>
+        </div>
+
+        <!-- ========================================================
+             PANEL 5: AUTONOMOUS AI MULTI-ROBOT ASSISTANT
+             ======================================================== -->
+        <div id="tab-ai-agent" class="sidebar-pane">
+          <section class="glass-card card-cyan">
+            <div class="card-header">
+              <span class="card-title">
+                <i class="fa fa-brain" style="color: var(--robot1-cyan);"></i> Autonomous AI Agent
+              </span>
+              <span id="badge-ai-model-status" class="badge-tag">READY (HYBRID)</span>
+            </div>
+
+            <!-- Execution Safety Mode Selector -->
+            <div style="font-size: 10px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">
+              Execution Safety Policy:
+            </div>
+            <div class="ai-mode-selector">
+              <button class="ai-mode-btn active" id="btn-ai-mode-advisory" data-mode="advisory" title="Mode 1: Plan and explain only. No actuation.">
+                1. Advisory
+              </button>
+              <button class="ai-mode-btn" id="btn-ai-mode-simulation" data-mode="simulation" title="Mode 2: Simulate complete motion in 3D Web Twin.">
+                2. Simulation
+              </button>
+              <button class="ai-mode-btn" id="btn-ai-mode-hardware" data-mode="hardware" title="Mode 3: Gated execution on physical robots with confirmation token.">
+                3. Hardware
+              </button>
+            </div>
+
+            <!-- Prompt Quick Chips -->
+            <div style="font-size: 10px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">
+              Quick Task Suggestions:
+            </div>
+            <div class="ai-chips-container">
+              <span class="ai-chip" data-prompt="Pick object at NW Bay [-200, 150, 150] and place at SE Table [150, 100, 180]">
+                📦 NW Bay ➔ SE Table
+              </span>
+              <span class="ai-chip" data-prompt="Check which robots can reach [-200, 150, 150] and evaluate clearance">
+                🔍 Check Reachability [-200, 150, 150]
+              </span>
+              <span class="ai-chip" data-prompt="Robot 3 pick up object at [-200, 150, 150] and handover to Robot 1">
+                🤝 R3 ➔ R1 Handover
+              </span>
+              <span class="ai-chip" data-prompt="Return all robots safely to mechanical home position">
+                🏠 Return All Arms Home
+              </span>
+            </div>
+
+            <!-- AI Chat & Reasoning Trace Stream -->
+            <div id="ai-chat-history" class="ai-chat-box">
+              <div class="ai-msg assistant">
+                <i class="fa fa-robot" style="color: var(--robot1-cyan); margin-right: 4px;"></i>
+                <strong>Autonomous Multi-Robot Agent online.</strong><br>
+                I can reason about tasks, calculate reachability across Robot 1 (5-DOF), Robot 2 (5-DOF), and Robot 3 (6-DOF), plan collision-free handovers, and coordinate physical execution safely. How can I assist?
+              </div>
+            </div>
+
+            <!-- User Text Input Row -->
+            <div class="ai-input-row">
+              <input type="text" id="ai-input-text" class="ai-text-input" placeholder="Give an instruction (e.g. 'Transfer object from NW to SE table')..." />
+              <button id="btn-ai-send" class="btn btn-primary btn-sm" title="Send instruction to AI Agent">
+                <i class="fa fa-paper-plane"></i>
+              </button>
+            </div>
+
+            <!-- Multi-step Plan Breakdown -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 10px; font-weight: 600; color: var(--text-dim); text-transform: uppercase;">
+                Decomposed Task Plan:
+              </span>
+              <span id="ai-plan-status-badge" class="badge-tag">No Active Plan</span>
+            </div>
+            <div id="ai-plan-steps" class="ai-plan-steps-container">
+              <div style="font-size: 11px; color: var(--text-dim); text-align: center; padding: 12px 0;">
+                Enter a task prompt or click a quick suggestion to synthesize a multi-robot plan.
+              </div>
+            </div>
+
+            <!-- One-Click AI Actions -->
+            <div style="display: flex; gap: 6px; margin-top: 8px;">
+              <button id="btn-ai-simulate-plan" class="btn btn-success btn-full" style="flex: 1;" disabled>
+                <i class="fa fa-play"></i> ▶ Simulate in 3D
+              </button>
+              <button id="btn-ai-execute-plan" class="btn btn-danger btn-full" style="flex: 1;" disabled>
+                <i class="fa fa-bolt"></i> ⚡ Execute (Mode 3)
+              </button>
+            </div>
           </section>
         </div>
 

@@ -817,17 +817,17 @@ h1.brand-title {
    SIDEBAR MODE TABS & JOGGER CONTROLS
    ============================================================ */
 .sidebar-mode-nav {
-  display: flex;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
   background: rgba(0, 0, 0, 0.3);
-  padding: 4px;
+  padding: 6px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-subtle);
   margin-bottom: 8px;
 }
 
 .mode-nav-btn {
-  flex: 1;
   background: transparent;
   border: none;
   color: var(--text-muted);
@@ -1203,5 +1203,254 @@ h1.brand-title {
   padding: 4px 0;
   text-align: center;
 }
+
+/* ============================================================
+   VIEW MODE PILLS (LIVE TELEMETRY VS SIMULATION PREVIEW)
+   ============================================================ */
+.view-mode-pill {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: all 0.25s ease;
+}
+
+.view-mode-pill.live {
+  background: rgba(0, 255, 157, 0.12);
+  color: var(--status-safe);
+  border: 1px solid rgba(0, 255, 157, 0.35);
+}
+
+.view-mode-pill.sim {
+  background: rgba(0, 240, 255, 0.15);
+  color: var(--robot1-cyan);
+  border: 1px solid rgba(0, 240, 255, 0.5);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
+}
+
+.view-mode-pill.stance {
+  background: rgba(200, 80, 255, 0.15);
+  color: #df80ff;
+  border: 1px solid rgba(200, 80, 255, 0.5);
+  box-shadow: 0 0 10px rgba(200, 80, 255, 0.25);
+}
+
+.view-mode-pill.executing {
+  background: rgba(255, 0, 85, 0.2);
+  color: var(--status-danger);
+  border: 1px solid rgba(255, 0, 85, 0.6);
+  animation: pulse-border 1s infinite alternate;
+}
+
+@keyframes pulse-border {
+  from { box-shadow: 0 0 4px rgba(255, 0, 85, 0.4); }
+  to { box-shadow: 0 0 14px rgba(255, 0, 85, 0.9); }
+}
+
+/* ============================================================
+   AI AUTONOMOUS AGENT PANEL & INTERFACES
+   ============================================================ */
+.ai-mode-selector {
+  display: flex;
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  gap: 4px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border-subtle);
+}
+
+.ai-mode-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 6px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+}
+
+.ai-mode-btn.active {
+  background: rgba(0, 240, 255, 0.2);
+  color: var(--robot1-cyan);
+  border: 1px solid rgba(0, 240, 255, 0.4);
+}
+
+.ai-chips-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.ai-chip {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.ai-chip:hover {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: var(--robot1-cyan);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.ai-chat-box {
+  display: flex;
+  flex-direction: column;
+  height: 220px;
+  overflow-y: auto;
+  background: rgba(10, 15, 26, 0.7);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 11px;
+}
+
+.ai-msg {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  max-width: 92%;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.ai-msg.user {
+  align-self: flex-end;
+  background: rgba(0, 240, 255, 0.15);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  color: #e0f8ff;
+}
+
+.ai-msg.assistant {
+  align-self: flex-start;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+}
+
+.ai-msg.system {
+  align-self: center;
+  background: rgba(255, 184, 0, 0.1);
+  border: 1px solid rgba(255, 184, 0, 0.3);
+  color: var(--status-warn);
+  font-size: 10px;
+}
+
+.ai-thought-trace {
+  background: rgba(0, 0, 0, 0.35);
+  border-left: 2px solid var(--robot3-amber);
+  padding: 6px 8px;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: #d1d5db;
+  border-radius: 0 4px 4px 0;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.ai-input-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.ai-text-input {
+  flex: 1;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid var(--border-subtle);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.ai-text-input:focus {
+  outline: none;
+  border-color: var(--robot1-cyan);
+}
+
+.ai-plan-steps-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+  padding-right: 4px;
+}
+
+.ai-plan-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.ai-plan-step.active {
+  background: rgba(0, 240, 255, 0.1);
+  border-color: var(--robot1-cyan);
+}
+
+.ai-plan-step.completed {
+  background: rgba(0, 255, 157, 0.08);
+  border-color: rgba(0, 255, 157, 0.3);
+}
+
+.step-status-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.step-status-tag.pending {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-dim);
+}
+
+.step-status-tag.running {
+  background: rgba(0, 240, 255, 0.2);
+  color: var(--robot1-cyan);
+}
+
+.step-status-tag.completed {
+  background: rgba(0, 255, 157, 0.2);
+  color: var(--status-safe);
+}
+
+.step-status-tag.failed {
+  background: rgba(255, 0, 85, 0.2);
+  color: var(--status-danger);
+}
+
 
 

@@ -53,6 +53,7 @@ from robot_control.handover.trajectory_cache import (
     store_cached_target_ik,
 )
 from robot_control.kinematics.fk_math import all_frame_positions, fk, dh_joint_angles
+from robot_control.ai import AICoordinator
 
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -1243,9 +1244,10 @@ class WebTwinEngine:
         }
 
 
-# Global engine & hardware bridge instances
+# Global engine, hardware bridge & AI coordinator instances
 twin_engine = WebTwinEngine()
 ros_bridge = WebTwinRosBridge(twin_engine)
+ai_coordinator = AICoordinator()
 
 ACTIVE_WEBSOCKETS: set = set()
 
@@ -1259,6 +1261,12 @@ async def telemetry_broadcaster(app: web.Application):
             if ACTIVE_WEBSOCKETS and ros_bridge:
                 hw_state = ros_bridge.get_all_robot_states()
                 frame_data = twin_engine.compute_frames(twin_engine.current_q)
+                ai_coordinator.update_telemetry(
+                    joint_state=twin_engine.current_q,
+                    frames=frame_data,
+                    grippers=twin_engine.gripper_state,
+                    hardware_status=hw_state,
+                )
                 min_d, pt_a, pt_b = compute_laser_endpoints(
                     np.array(twin_engine.current_q["robot1"]),
                     twin_engine.robots["robot1"],
@@ -1636,6 +1644,50 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
                             if not ws.closed:
                                 await ws.send_str(json.dumps(res))
 
+                    elif cmd == "ai_chat":
+                        message = data.get("message", "")
+                        mode = data.get("mode", "advisory")
+                        res = await loop.run_in_executor(
+                            None, ai_coordinator.handle_chat_instruction, message, mode
+                        )
+                        res["cmd"] = "ai_chat_response"
+                        if not ws.closed:
+                            await ws.send_str(json.dumps(res))
+
+                    elif cmd == "ai_plan":
+                        prompt = data.get("prompt", "")
+                        mode = data.get("mode", "advisory")
+                        res = await loop.run_in_executor(
+                            None, ai_coordinator.handle_chat_instruction, prompt, mode
+                        )
+                        res["cmd"] = "ai_plan_response"
+                        if not ws.closed:
+                            await ws.send_str(json.dumps(res))
+
+                    elif cmd == "ai_execute_hardware":
+                        task_id = data.get("task_id", "")
+                        token = data.get("token", "")
+                        auth_res = ai_coordinator.authorize_hardware_execution(task_id, token, safety_mode="hardware")
+                        if auth_res.get("success"):
+                            steps = auth_res.get("trajectory_steps", [])
+                            await loop.run_in_executor(
+                                None, ros_bridge.execute_hardware_trajectory, steps, 0.08
+                            )
+                            res = {
+                                "cmd": "ai_execution_response",
+                                "success": True,
+                                "task_id": task_id,
+                                "message": "Hardware trajectory streaming successfully initiated.",
+                            }
+                        else:
+                            res = {
+                                "cmd": "ai_execution_response",
+                                "success": False,
+                                "error": auth_res.get("error", "Authorization failed"),
+                            }
+                        if not ws.closed:
+                            await ws.send_str(json.dumps(res))
+
                 except Exception as e:
                     traceback.print_exc()
                     if not ws.closed:
@@ -1666,6 +1718,39 @@ async def handle_index(request: web.Request) -> web.Response:
         return web.Response(text=f.read(), content_type="text/html")
 
 
+async def handle_api_ai_world_model(request: web.Request) -> web.Response:
+    snapshot = ai_coordinator.world_model.snapshot()
+    return web.json_response(snapshot)
+
+
+async def handle_api_ai_chat(request: web.Request) -> web.Response:
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    message = data.get("message", "")
+    mode = data.get("mode", "advisory")
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, ai_coordinator.handle_chat_instruction, message, mode)
+    return web.json_response(res)
+
+
+async def handle_api_ai_execute(request: web.Request) -> web.Response:
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    task_id = data.get("task_id", "")
+    token = data.get("token", "")
+    loop = asyncio.get_running_loop()
+    auth_res = ai_coordinator.authorize_hardware_execution(task_id, token, safety_mode="hardware")
+    if auth_res.get("success"):
+        steps = auth_res.get("trajectory_steps", [])
+        await loop.run_in_executor(None, ros_bridge.execute_hardware_trajectory, steps, 0.08)
+        return web.json_response({"success": True, "message": "Dispatched to hardware."})
+    return web.json_response({"success": False, "error": auth_res.get("error")}, status=400)
+
+
 async def on_app_startup(app: web.Application):
     """Start the ROS 2 background bridge and telemetry broadcaster."""
     ros_bridge.start()
@@ -1685,6 +1770,9 @@ def create_app() -> web.Application:
     app.on_cleanup.append(on_app_cleanup)
     app.router.add_get("/", handle_index)
     app.router.add_get("/ws", handle_websocket)
+    app.router.add_get("/api/ai/world_model", handle_api_ai_world_model)
+    app.router.add_post("/api/ai/chat", handle_api_ai_chat)
+    app.router.add_post("/api/ai/execute", handle_api_ai_execute)
     static_dir = os.path.join(SCRIPT_DIR, "static")
     app.router.add_static("/static/", static_dir)
     return app

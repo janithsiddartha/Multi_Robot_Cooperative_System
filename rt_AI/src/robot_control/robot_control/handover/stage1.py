@@ -60,12 +60,26 @@ class MockKinematicsConfig:
 
 
 def default_config_dir():
-    # Check source workspace config first so direct edits take effect immediately
+    # 1. Check source workspace config first so direct edits take effect immediately
     src_dir = os.path.normpath(
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "config")
     )
     if os.path.exists(os.path.join(src_dir, "handover.yaml")):
         return src_dir
+    # 2. Check ROS2 ament package share directory
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        share_dir = os.path.join(get_package_share_directory("robot_control"), "config")
+        if os.path.exists(os.path.join(share_dir, "handover.yaml")):
+            return share_dir
+    except Exception:
+        pass
+    # 3. Check workspace root src/robot_control/config if installed
+    ws_src = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "src", "robot_control", "config")
+    )
+    if os.path.exists(os.path.join(ws_src, "handover.yaml")):
+        return ws_src
     return src_dir
 
 

@@ -33,6 +33,14 @@ class WebTwinApp {
     this.currentPlanSummary = null;
     this.currentPlanKey = null;
 
+    // View Mode & Simulation Gating: 'live' | 'sim' | 'stance' | 'executing'
+    this.viewMode = 'live';
+    this.isSimulating = false;
+
+    // AI Autonomous Agent State
+    this.aiSafetyMode = 'advisory'; // 'advisory' | 'simulation' | 'hardware'
+    this.aiActivePlan = null;
+
     // Active Pending Plan Request
     this.pendingPlan = null;
 
@@ -238,6 +246,23 @@ class WebTwinApp {
       safetyClearanceVal: document.getElementById('modal-clearance-val'),
       btnConfirmExecute: document.getElementById('btn-confirm-execute'),
       btnCancelExecute: document.getElementById('btn-cancel-execute'),
+
+      // Telemetry View Mode Indicator & Toggle
+      badgeViewMode: document.getElementById('badge-view-mode'),
+      btnToggleViewMode: document.getElementById('btn-toggle-view-mode'),
+
+      // AI Agent Panel References
+      btnAiModeAdvisory: document.getElementById('btn-ai-mode-advisory'),
+      btnAiModeSimulation: document.getElementById('btn-ai-mode-simulation'),
+      btnAiModeHardware: document.getElementById('btn-ai-mode-hardware'),
+      aiChips: document.querySelectorAll('.ai-chip'),
+      aiChatHistory: document.getElementById('ai-chat-history'),
+      aiInputText: document.getElementById('ai-input-text'),
+      btnAiSend: document.getElementById('btn-ai-send'),
+      aiPlanSteps: document.getElementById('ai-plan-steps'),
+      aiPlanStatusBadge: document.getElementById('ai-plan-status-badge'),
+      btnAiSimulatePlan: document.getElementById('btn-ai-simulate-plan'),
+      btnAiExecutePlan: document.getElementById('btn-ai-execute-plan'),
     };
   }
 
@@ -404,8 +429,82 @@ class WebTwinApp {
     // Top Right Home All Button
     if (this.dom.btnHomeAll) {
       this.dom.btnHomeAll.addEventListener('click', () => {
+        this.resetPlayback();
+        this.setViewMode('live');
         this.log('[System] Returning all physical robots to mechanical HOME...', 'info');
         this.send({ cmd: 'home_all' });
+      });
+    }
+
+    if (this.dom.btnToggleViewMode) {
+      this.dom.btnToggleViewMode.addEventListener('click', () => {
+        this.resetPlayback();
+        this.setViewMode('live');
+        this.log('👁️ Returned view to live robot telemetry.', 'info');
+      });
+    }
+
+    // AI Safety Mode Policy Buttons
+    const aiModeMap = [
+      { btn: this.dom.btnAiModeAdvisory, mode: 'advisory' },
+      { btn: this.dom.btnAiModeSimulation, mode: 'simulation' },
+      { btn: this.dom.btnAiModeHardware, mode: 'hardware' },
+    ];
+    aiModeMap.forEach(({ btn, mode }) => {
+      if (btn) {
+        btn.addEventListener('click', () => {
+          aiModeMap.forEach((item) => item.btn && item.btn.classList.remove('active'));
+          btn.classList.add('active');
+          this.aiSafetyMode = mode;
+          this.log(`[AI Policy] Execution mode set to ${mode.toUpperCase()}.`, 'info');
+        });
+      }
+    });
+
+    // AI Prompt Quick Chips
+    if (this.dom.aiChips) {
+      this.dom.aiChips.forEach((chip) => {
+        chip.addEventListener('click', () => {
+          const prompt = chip.getAttribute('data-prompt');
+          if (this.dom.aiInputText) {
+            this.dom.aiInputText.value = prompt;
+            this.sendAiMessage(prompt);
+          }
+        });
+      });
+    }
+
+    // AI Input and Send Button
+    if (this.dom.btnAiSend && this.dom.aiInputText) {
+      this.dom.btnAiSend.addEventListener('click', () => {
+        const text = this.dom.aiInputText.value.trim();
+        if (text) {
+          this.sendAiMessage(text);
+          this.dom.aiInputText.value = '';
+        }
+      });
+      this.dom.aiInputText.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          const text = this.dom.aiInputText.value.trim();
+          if (text) {
+            this.sendAiMessage(text);
+            this.dom.aiInputText.value = '';
+          }
+        }
+      });
+    }
+
+    // AI Simulate and Execute Action Buttons
+    if (this.dom.btnAiSimulatePlan) {
+      this.dom.btnAiSimulatePlan.addEventListener('click', () => {
+        if (!this.aiActivePlan) return;
+        this.simulateAiPlan(this.aiActivePlan);
+      });
+    }
+    if (this.dom.btnAiExecutePlan) {
+      this.dom.btnAiExecutePlan.addEventListener('click', () => {
+        if (!this.aiActivePlan) return;
+        this.executeAiPlanOnHardware(this.aiActivePlan);
       });
     }
 
@@ -1179,6 +1278,11 @@ class WebTwinApp {
     else if (data.type === 'telemetry_broadcast' || data.cmd === 'telemetry_broadcast') {
       if (data.hardware) {
         this._updateHardwareDock(data.hardware.available_ports, data.hardware.robots);
+        if (data.hardware.is_hardware_executing) {
+          this.setViewMode('executing');
+        } else if (this.viewMode === 'executing') {
+          this.setViewMode('live');
+        }
       }
       if (data.joint_state && !this.isSimulating) {
         this.currentJointAngles = data.joint_state;
@@ -1427,6 +1531,7 @@ class WebTwinApp {
           data.clearance.endpoint_b
         );
       }
+      this.setViewMode('live');
       this.log('✓ All robots returned to mechanical HOME positions.', 'success');
     }
 
@@ -1437,6 +1542,7 @@ class WebTwinApp {
         alert(`Handover Preview: ${data.error}`);
         return;
       }
+      this.setViewMode('stance');
       this.currentJointAngles = data.joint_state;
       this._updateJointTables(data.joint_state);
       for (const [rid, frames] of Object.entries(data.frames)) {
@@ -1578,6 +1684,17 @@ class WebTwinApp {
         `[Single IK] ${data.robot_id.toUpperCase()} posed to [${data.target_xyz.join(', ')}] mm (error: ${data.error_mm} mm).`,
         'success'
       );
+    }
+
+    // 21. AI Autonomous Assistant Response
+    else if (data.cmd === 'ai_chat_response') {
+      this._handleAiChatResponse(data);
+    }
+    else if (data.cmd === 'ai_plan_response') {
+      this._handleAiPlanResponse(data);
+    }
+    else if (data.cmd === 'ai_execution_response') {
+      this._handleAiExecutionResponse(data);
     }
   }
 
@@ -2214,6 +2331,31 @@ class WebTwinApp {
   }
 
   // ─────────────────────────────────────────────────────────────
+  // View & Simulation Gating Mode Manager
+  // ─────────────────────────────────────────────────────────────
+  setViewMode(mode) {
+    this.viewMode = mode;
+    this.isSimulating = (mode === 'sim' || mode === 'stance');
+
+    if (!this.dom.badgeViewMode) return;
+    this.dom.badgeViewMode.className = `view-mode-pill ${mode}`;
+
+    if (mode === 'live') {
+      this.dom.badgeViewMode.innerHTML = '<i class="fa fa-satellite-dish"></i> LIVE TELEMETRY';
+      if (this.dom.btnToggleViewMode) this.dom.btnToggleViewMode.style.display = 'none';
+    } else if (mode === 'sim') {
+      this.dom.badgeViewMode.innerHTML = '<i class="fa fa-film"></i> SIMULATION PREVIEW';
+      if (this.dom.btnToggleViewMode) this.dom.btnToggleViewMode.style.display = 'inline-block';
+    } else if (mode === 'stance') {
+      this.dom.badgeViewMode.innerHTML = '<i class="fa fa-eye"></i> STANCE PREVIEW';
+      if (this.dom.btnToggleViewMode) this.dom.btnToggleViewMode.style.display = 'inline-block';
+    } else if (mode === 'executing') {
+      this.dom.badgeViewMode.innerHTML = '<i class="fa fa-bolt"></i> HARDWARE EXECUTING';
+      if (this.dom.btnToggleViewMode) this.dom.btnToggleViewMode.style.display = 'none';
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
   // Playback & Simulation Engine (60 FPS)
   // ─────────────────────────────────────────────────────────────
   togglePlayback() {
@@ -2232,6 +2374,7 @@ class WebTwinApp {
 
   startPlayback() {
     if (this.trajectorySteps.length === 0) return;
+    this.setViewMode('sim');
     if (this.currentStepIdx >= this.trajectorySteps.length - 1) {
       this.currentStepIdx = 0;
     }
@@ -2304,6 +2447,7 @@ class WebTwinApp {
 
   resetPlayback() {
     this.pausePlayback();
+    this.setViewMode('live');
     this.currentStepIdx = 0;
     this._lastLoggedPhase = null;
     this.dom.timelineSlider.value = 0;
@@ -2364,6 +2508,148 @@ class WebTwinApp {
     entry.innerHTML = `<span class="log-time">[${timeStr}]</span> ${msg}`;
     this.dom.terminalLog.appendChild(entry);
     this.dom.terminalLog.scrollTop = this.dom.terminalLog.scrollHeight;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // AI Autonomous Assistant Handlers & Visualizers
+  // ─────────────────────────────────────────────────────────────
+  sendAiMessage(message) {
+    if (!message) return;
+    this._renderAiChatMessage('user', message);
+    this._showAiThinkingIndicator();
+    this.send({
+      cmd: 'ai_chat',
+      message: message,
+      mode: this.aiSafetyMode || 'advisory',
+    });
+  }
+
+  _renderAiChatMessage(role, text, thoughtTrace = null) {
+    if (!this.dom.aiChatHistory) return;
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `ai-msg ${role}`;
+
+    if (role === 'assistant') {
+      let html = `<i class="fa fa-brain" style="color:var(--robot1-cyan); margin-right:4px;"></i><strong>AI Coordinator:</strong><br>${(text || '').replace(/\n/g, '<br>')}`;
+      if (thoughtTrace) {
+        html += `<div class="ai-thought-trace"><strong><i class="fa fa-microchip"></i> Thought Trace & Kinematics Log:</strong><br>${thoughtTrace.replace(/\n/g, '<br>')}</div>`;
+      }
+      msgDiv.innerHTML = html;
+    } else {
+      msgDiv.textContent = text;
+    }
+    this.dom.aiChatHistory.appendChild(msgDiv);
+    this.dom.aiChatHistory.scrollTop = this.dom.aiChatHistory.scrollHeight;
+  }
+
+  _showAiThinkingIndicator() {
+    this._removeAiThinkingIndicator();
+    if (!this.dom.aiChatHistory) return;
+    const ind = document.createElement('div');
+    ind.id = 'ai-typing-indicator';
+    ind.className = 'ai-msg system';
+    ind.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Reasoning about task kinematics, reachability, and safety...';
+    this.dom.aiChatHistory.appendChild(ind);
+    this.dom.aiChatHistory.scrollTop = this.dom.aiChatHistory.scrollHeight;
+  }
+
+  _removeAiThinkingIndicator() {
+    const el = document.getElementById('ai-typing-indicator');
+    if (el) el.remove();
+  }
+
+  _handleAiChatResponse(data) {
+    this._removeAiThinkingIndicator();
+    this._renderAiChatMessage('assistant', data.response || data.message || '', data.thought_trace);
+
+    if (data.plan) {
+      this.aiActivePlan = data.plan;
+      this._renderAiPlan(data.plan);
+    }
+  }
+
+  _handleAiPlanResponse(data) {
+    this._removeAiThinkingIndicator();
+    if (data.plan) {
+      this.aiActivePlan = data.plan;
+      this._renderAiPlan(data.plan);
+      this.log(`✓ AI Task Plan synthesized: ${data.plan.summary || data.plan.task_id}`, 'success');
+      if (this.aiSafetyMode === 'simulation' && data.plan.trajectory_steps) {
+        this.simulateAiPlan(data.plan);
+      }
+    }
+  }
+
+  _handleAiExecutionResponse(data) {
+    if (data.success) {
+      this.log(`🚀 [AI Hardware Execution] Successfully streamed trajectory!`, 'success');
+      this._renderAiChatMessage('assistant', `✓ Hardware trajectory successfully dispatched and completed on physical robot arms.`);
+    } else {
+      this.log(`⚠️ [AI Hardware Execution] Execution halted: ${data.error}`, 'error');
+      this._renderAiChatMessage('assistant', `⚠️ Execution failed or rejected by safety gate: ${data.error}`);
+    }
+  }
+
+  _renderAiPlan(plan) {
+    if (!this.dom.aiPlanSteps) return;
+    this.dom.aiPlanSteps.innerHTML = '';
+
+    if (this.dom.aiPlanStatusBadge) {
+      this.dom.aiPlanStatusBadge.textContent = `${plan.status || 'READY'} (${plan.steps ? plan.steps.length : 0} steps)`;
+      this.dom.aiPlanStatusBadge.className = 'badge-tag';
+    }
+
+    if (this.dom.btnAiSimulatePlan) {
+      this.dom.btnAiSimulatePlan.disabled = !(plan.trajectory_steps && plan.trajectory_steps.length > 0);
+    }
+    if (this.dom.btnAiExecutePlan) {
+      this.dom.btnAiExecutePlan.disabled = !(plan.trajectory_steps && plan.trajectory_steps.length > 0);
+    }
+
+    if (!plan.steps || plan.steps.length === 0) {
+      this.dom.aiPlanSteps.innerHTML = '<div style="font-size:11px; color:var(--text-dim); text-align:center; padding:8px;">No subtasks required for this command.</div>';
+      return;
+    }
+
+    plan.steps.forEach((step, idx) => {
+      const stepEl = document.createElement('div');
+      stepEl.className = `ai-plan-step ${step.status === 'RUNNING' ? 'active' : ''} ${step.status === 'COMPLETED' ? 'completed' : ''}`;
+      stepEl.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:2px;">
+          <span style="font-weight:600; color:var(--text-main);">${idx + 1}. ${step.name || step.action}</span>
+          <span style="font-size:10px; color:var(--text-dim);">${step.description || ''}</span>
+        </div>
+        <span class="step-status-tag ${step.status ? step.status.toLowerCase() : 'pending'}">${step.status || 'PENDING'}</span>
+      `;
+      this.dom.aiPlanSteps.appendChild(stepEl);
+    });
+  }
+
+  simulateAiPlan(plan) {
+    if (!plan || !plan.trajectory_steps || plan.trajectory_steps.length === 0) {
+      alert('This plan does not have a simulated trajectory.');
+      return;
+    }
+    this.log(`▶ [AI Simulation] Previewing AI trajectory (${plan.trajectory_steps.length} steps)...`, 'info');
+    this.loadTrajectory(plan.trajectory_steps);
+    this.startPlayback();
+  }
+
+  executeAiPlanOnHardware(plan) {
+    if (!plan || !plan.trajectory_steps || plan.trajectory_steps.length === 0) {
+      alert('No verified trajectory steps to execute.');
+      return;
+    }
+    if (this.aiSafetyMode !== 'hardware') {
+      alert('Safety Gate: Set Execution Safety Policy to "3. Hardware" to authorize physical arm motion.');
+      return;
+    }
+    if (this.dom.safetyClearanceVal) {
+      this.dom.safetyClearanceVal.textContent = `${plan.min_clearance_mm || 50.0} mm`;
+    }
+    if (this.dom.safetyModal) {
+      this.dom.safetyModal.classList.add('active');
+    }
   }
 }
 
